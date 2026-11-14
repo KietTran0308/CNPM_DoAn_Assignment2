@@ -1,0 +1,56 @@
+@startuml
+left to right direction
+skinparam packageStyle rectangle
+
+' Định nghĩa các Tác nhân (Actors)
+actor "Khách hàng (Customer)" as KhachHang
+actor "Dịch vụ thanh toán\n(Payment Service)" as PaymentService
+actor "Barista" as Barista
+
+' Khung hệ thống
+rectangle "BrewLite System" {
+    usecase "UC-01: Đặt và Thanh toán\nđơn hàng\n(UC06 + UC09)" as UC01
+    usecase "UC08: Áp mã\nkhuyến mãi / voucher" as UC08
+    usecase "Dùng điểm thưởng\nđể giảm giá" as DungDiem
+    usecase "Xác thực JWT\n(UC07 Đăng nhập)" as XacThucJWT
+    usecase "Tính giá & kiểm tra\ngiỏ hàng (server)" as TinhGia
+    usecase "Kiểm tra khả dụng\nnguyên liệu" as KiemTraNguyenLieu
+    usecase "UC09: Thanh toán\nkhông tiền mặt (QR)" as UC09
+    usecase "UC11: Tích điểm thưởng" as UC11
+    usecase "Hoàn tiền mô phỏng\n(khi không hoàn tất)" as HoanTien
+    usecase "Thanh toán lại sau\nPAYMENT_FAILED" as ThanhToanLai
+    usecase "Sinh mã QR thanh toán\n(theo đơn, hạn = hạn đơn)" as SinhQR
+    usecase "Nhận kết quả thanh toán\n(callback, idempotent)" as NhanKetQua
+    usecase "UC10: Xem xác nhận đơn" as UC10
+    usecase "Đưa đơn PAID vào\nhàng chờ quầy (UC13)" as DuaDonVaoHangCho
+    usecase "Trừ kho nguyên liệu\n(Optimistic Locking)" as TruKho
+}
+
+' Liên kết Tác nhân với Use Case chính và dịch vụ
+KhachHang --> UC01
+
+PaymentService --> SinhQR
+PaymentService --> NhanKetQua
+
+Barista --> DuaDonVaoHangCho
+
+' Các mối quan hệ include và extend
+UC08 ..> UC01 : <<extend>>
+DungDiem ..> UC01 : <<extend>>
+
+UC01 ..> XacThucJWT : <<include>>
+UC01 ..> TinhGia : <<include>>
+UC01 ..> KiemTraNguyenLieu : <<include>>
+UC01 ..> UC09 : <<include>>
+
+UC09 ..> HoanTien : <<extend>>
+UC09 ..> ThanhToanLai : <<extend>>
+UC09 ..> UC11 : <<extend>>
+
+UC09 ..> SinhQR : <<include>>
+UC09 ..> NhanKetQua : <<include>>
+UC09 ..> UC10 : <<include>>
+UC09 ..> DuaDonVaoHangCho : <<include>>
+UC09 ..> TruKho : <<include>>
+
+@enduml

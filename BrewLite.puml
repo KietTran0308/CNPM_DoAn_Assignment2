@@ -1,0 +1,49 @@
+@startuml
+left to right direction
+skinparam packageStyle rectangle
+
+' Định nghĩa các Tác nhân (Actors)
+actor "Khách hàng" as KhachHang
+actor "Barista" as Barista
+actor "Hệ thống thanh toán" as HeThongThanhToan
+
+' Khung hệ thống
+rectangle "HỆ THỐNG BrewLite - ỨNG DỤNG ĐẶT CAFE KHÔNG TIỀN MẶT" {
+    usecase "UC01. Đăng ký" as UC01
+    usecase "UC02. Xem Menu" as UC02
+    usecase "UC03. Xem chi tiết sản phẩm" as UC03
+    usecase "UC04. Chọn Size/Topping" as UC04
+    usecase "UC05. Quản lí giỏ hàng" as UC05
+    usecase "UC06. Tạo đơn hàng" as UC06
+    usecase "UC07. Đăng nhập" as UC07
+    usecase "UC08. Áp mã khuyến mãi" as UC08
+    usecase "UC09. Thanh toán không tiền mặt" as UC09
+    usecase "UC10. Xem xác nhận đơn" as UC10
+    usecase "UC11. Tích điểm thưởng" as UC11
+    usecase "UC12. Xem lịch sử đơn" as UC12
+    usecase "UC13. Tiếp nhận đơn" as UC13
+    usecase "UC14. Cập nhật trạng thái pha chế" as UC14
+}
+
+' Liên kết Tác nhân với Use Case
+KhachHang --> UC01
+KhachHang --> UC02
+KhachHang --> UC03
+KhachHang --> UC05
+KhachHang --> UC06
+KhachHang --> UC07
+KhachHang --> UC12
+
+Barista --> UC13
+Barista --> UC14
+
+HeThongThanhToan --> UC09
+
+' Các mối quan hệ include và extend
+UC03 ..> UC04 : <<extend>>
+UC05 ..> UC07 : <<extend>>
+UC06 ..> UC08 : <<extend>>
+UC06 ..> UC09 : <<include>>
+UC09 ..> UC10 : <<include>>
+UC09 ..> UC11 : <<extend>>
+@enduml
