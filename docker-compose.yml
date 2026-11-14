@@ -1,0 +1,81 @@
+name: brewlite_assignment2_local
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set_POSTGRES_PASSWORD_in_.env}
+      POSTGRES_DB: ${POSTGRES_DB:-brewlite}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      # New, independent local DB volume (do NOT use old BrewLite volume).
+      - postgres_data_assignment2:/var/lib/postgresql/data
+      # Initialization happens once, on a completely empty Postgres data directory.
+      - ./apps/api/prisma/dbBrewLite.sql:/docker-entrypoint-initdb.d/01-brewlite.sql:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          PGPASSWORD="$$POSTGRES_PASSWORD" psql -h 127.0.0.1
+          -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -tAc
+          "SELECT CASE WHEN EXISTS (SELECT 1 FROM public.payment_methods WHERE code = 'ZALOPAY')
+          AND EXISTS (SELECT 1 FROM public.products WHERE code = 'BL015')
+          THEN 'ready' ELSE 'pending' END" | grep -qx ready
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 45s
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-brewlite}?schema=public"
+      JWT_SECRET: ${JWT_SECRET:?Set_JWT_SECRET_in_.env}
+      FRONTEND_URL: ${LOCAL_FRONTEND_URL:-http://localhost:3100,http://127.0.0.1:3100}
+      PORT: "4000"
+      ENABLE_DEMO_PAYMENTS: ${ENABLE_DEMO_PAYMENTS:-false}
+      ZALOPAY_APP_ID: ${ZALOPAY_APP_ID:-}
+      ZALOPAY_KEY1: ${ZALOPAY_KEY1:-}
+      ZALOPAY_KEY2: ${ZALOPAY_KEY2:-}
+      ZALOPAY_CREATE_URL: ${ZALOPAY_CREATE_URL:-https://sb-openapi.zalopay.vn/v2/create}
+      ZALOPAY_QUERY_URL: ${ZALOPAY_QUERY_URL:-https://sb-openapi.zalopay.vn/v2/query}
+      ZALOPAY_CALLBACK_URL: ${ZALOPAY_LOCAL_CALLBACK_URL:-}
+      ZALOPAY_AUTO_RECONCILE: ${ZALOPAY_AUTO_RECONCILE:-true}
+      ZALOPAY_LOCAL_MODE: "true"
+      ZALOPAY_RETURN_ORIGIN: ${ZALOPAY_RETURN_ORIGIN:-}
+    ports:
+      - "127.0.0.1:4100:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4100}
+        NEXT_PUBLIC_ENABLE_DEMO_PAYMENTS: ${NEXT_PUBLIC_ENABLE_DEMO_PAYMENTS:-false}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3100:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data_assignment2:
+    name: brewlite_assignment2_pg16_fresh

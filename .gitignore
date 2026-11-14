@@ -1,0 +1,27 @@
+# Private configuration
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Dependency / build / debug
+**/node_modules/
+**/.next/
+**/dist/
+**/coverage/
+**/out/
+**/build/
+**/*.tsbuildinfo
+**/*.log
+npm-debug.log*
+
+# OS / IDE / secrets
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.pem
+*.key
+*.p12
