@@ -1,0 +1,411 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PAYMENT_FAILED
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+
+  @@map("order_status")
+}
+
+enum Size {
+  S
+  M
+  L
+
+  @@map("product_size")
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+
+  @@map("payment_status")
+}
+
+enum DiscountType {
+  PERCENT
+  FIXED
+
+  @@map("discount_type")
+}
+
+enum LoyaltyType {
+  EARN
+  REDEEM
+  REVERSAL
+
+  @@map("loyalty_type")
+}
+
+// ==================== MODELS ====================
+// IMPORTANT: Raw SQL migration additionally contains CHECK constraints, expression indexes,
+// and partial UNIQUE indexes that cannot all be expressed in this Prisma schema.
+// Do not replace migration.sql with a generated migration without reviewing these rules.
+
+
+model User {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String   @unique @db.VarChar(255)
+  passwordHash  String   @map("password_hash") @db.VarChar(255)
+  fullName      String   @map("full_name") @db.VarChar(255)
+  phone         String?  @db.VarChar(20)
+  role          String   @default("CUSTOMER") @db.VarChar(16)
+  loyaltyPoints Int      @default(0) @map("loyalty_points")
+  reservedPoints Int      @default(0) @map("reserved_points")
+  loyaltyDebt   Int      @default(0) @map("loyalty_debt")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  orders              Order[]
+  loyaltyTransactions LoyaltyTransaction[]
+  ownedVouchers       UserVoucher[]
+  performedMovements  IngredientMovement[] @relation("IngredientMovementPerformer")
+  changedOrderStatuses OrderStatusHistory[] @relation("OrderStatusChangedBy")
+
+  avatar         String? @map("avatar_url") @db.VarChar(500)
+  favoriteBranch String? @map("favorite_branch") @db.VarChar(255)
+
+  @@map("users")
+}
+
+model Product {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String  @unique(map: "ux_products_code") @db.VarChar(50)
+  name        String  @db.VarChar(255)
+  category    String  @db.VarChar(50)
+  description String? @db.VarChar(1000)
+  imageUrl    String? @map("image_url") @db.VarChar(500)
+  imageKey    String? @unique(map: "ux_products_image_key") @map("image_key") @db.VarChar(100)
+  version     Int     @default(0)
+  isActive    Boolean @default(true) @map("is_active")
+
+  orderItems OrderItem[]
+  sizePrices ProductSizePrice[]
+
+  @@map("products")
+}
+
+model Topping {
+  id       String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code     String  @unique(map: "ux_toppings_code") @db.VarChar(20)
+  name     String  @db.VarChar(255)
+  price    Decimal @db.Decimal(12, 2)
+  isActive Boolean @default(true) @map("is_active")
+
+  orderItemToppings OrderItemTopping[]
+  ingredients       ToppingIngredient[]
+
+  @@map("toppings")
+}
+
+model ProductSizePrice {
+  productId String  @map("product_id") @db.Uuid
+  size      Size
+  price     Decimal @db.Decimal(12, 2)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_psp_product")
+
+  ingredients ProductIngredient[]
+  orderItems  OrderItem[]         @relation("OrderItemSize")
+
+  @@id([productId, size], map: "product_size_prices_pkey")
+  @@map("product_size_prices")
+}
+
+model Coupon {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code          String        @unique @db.VarChar(50)
+  discountType  DiscountType  @map("discount_type")
+  discountValue Decimal       @map("discount_value") @db.Decimal(12, 2)
+  minOrderValue Decimal       @default(0) @map("min_order_value") @db.Decimal(12, 2)
+  maxUses       Int           @map("max_uses")
+  usedCount     Int           @default(0) @map("used_count")
+  reservedCount Int           @default(0) @map("reserved_count")
+  isActive      Boolean       @default(true) @map("is_active")
+  validFrom     DateTime      @map("valid_from") @db.Timestamptz(6)
+  validTo       DateTime      @map("valid_to") @db.Timestamptz(6)
+  ownedVouchers UserVoucher[]
+
+  orders Order[]
+
+  @@map("coupons")
+}
+
+model Order {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderCode      Int         @unique @default(autoincrement()) @map("order_code")
+  userId         String      @map("user_id") @db.Uuid
+  couponId       String?     @map("coupon_id") @db.Uuid
+  status         OrderStatus @default(PENDING)
+  reservationStatus String @default("NONE") @map("reservation_status") @db.VarChar(16)
+  subtotal       Decimal     @db.Decimal(12, 2)
+  discountAmount Decimal     @default(0) @map("discount_amount") @db.Decimal(12, 2)
+  pointsUsed     Int         @default(0) @map("points_used")
+  pointsDiscount Decimal     @default(0) @map("points_discount_amount") @db.Decimal(12, 2)
+  total          Decimal     @db.Decimal(12, 2)
+  expiresAt      DateTime    @default(dbgenerated("(now() + '00:20:00'::interval)")) @map("expires_at") @db.Timestamptz(6)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user                User                 @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_orders_user")
+  coupon              Coupon?              @relation(fields: [couponId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_orders_coupon")
+  orderItems          OrderItem[]
+  payments            Payment[]
+  loyaltyTransactions LoyaltyTransaction[]
+  statusHistory       OrderStatusHistory[]
+  usedVouchers        UserVoucher[]        @relation("VoucherUsedOrder")
+  reservedVouchers    UserVoucher[]        @relation("VoucherReservedOrder")
+  ingredientMovements IngredientMovement[]
+  ingredientReservations OrderIngredientReservation[]
+
+  idempotencyKey String? @unique(map: "ux_orders_idempotency_key") @map("idempotency_key") @db.VarChar(128)
+  requestHash    String? @map("request_hash") @db.VarChar(64)
+
+  @@index([userId, createdAt], map: "idx_orders_user_created")
+  @@index([status], map: "idx_orders_status")
+  @@index([couponId], map: "idx_orders_coupon")
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId   String  @map("order_id") @db.Uuid
+  productId String  @map("product_id") @db.Uuid
+  size      Size
+  qty       Int     @map("quantity")
+  basePrice Decimal @map("base_price") @db.Decimal(12, 2)
+  unitPrice Decimal @map("unit_price") @db.Decimal(12, 2)
+  lineTotal Decimal @map("line_total") @db.Decimal(12, 2)
+  sugar     String  @default("100%") @db.VarChar(20)
+  ice       String  @default("100%") @db.VarChar(20)
+  note      String? @db.VarChar(250)
+
+  order     Order              @relation(fields: [orderId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_order_items_order")
+  product   Product            @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_order_items_product")
+  sizePrice ProductSizePrice   @relation("OrderItemSize", fields: [productId, size], references: [productId, size], onDelete: NoAction, onUpdate: NoAction, map: "fk_order_items_valid_size")
+  toppings  OrderItemTopping[]
+
+  @@index([orderId], map: "idx_order_items_order")
+  @@index([productId], map: "idx_order_items_product")
+  @@map("order_items")
+}
+
+model OrderItemTopping {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderItemId String  @map("order_item_id") @db.Uuid
+  toppingId   String  @map("topping_id") @db.Uuid
+  price       Decimal @map("unit_price") @db.Decimal(12, 2)
+  servings    Int     @default(1)
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_oit_order_item")
+  topping   Topping   @relation(fields: [toppingId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_oit_topping")
+
+  @@unique([orderItemId, toppingId], map: "uq_order_item_topping")
+  @@index([orderItemId], map: "idx_oit_order_item")
+  @@map("order_item_toppings")
+}
+
+// Payment method catalog. Unlike a PostgreSQL enum, methods can be activated
+// or disabled without changing the database schema.
+model PaymentMethod {
+  code      String   @id @db.VarChar(20)
+  name      String   @db.VarChar(100)
+  type      String   @db.VarChar(20) // GATEWAY or INTERNAL (checked by SQL migration)
+  isActive  Boolean  @default(false) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  payments Payment[]
+
+  @@map("payment_methods")
+}
+
+model Payment {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId        String        @map("order_id") @db.Uuid
+  idempotencyKey String        @unique(map: "payments_idempotency_key") @map("idempotency_key") @db.VarChar(128)
+  amount         Decimal       @db.Decimal(12, 2)
+  methodCode     String        @map("method_code") @db.VarChar(20)
+  status         PaymentStatus
+  paidAt         DateTime?     @map("paid_at") @db.Timestamptz(6)
+  refundedAmount Decimal       @default(0) @map("refunded_amount") @db.Decimal(12, 2)
+  refundedAt     DateTime?     @map("refunded_at") @db.Timestamptz(6)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order              Order                      @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_payments_order")
+  paymentMethod      PaymentMethod              @relation(fields: [methodCode], references: [code], onDelete: Restrict, onUpdate: Restrict, map: "fk_payments_method")
+  gatewayTransaction PaymentGatewayTransaction?
+
+  @@index([orderId], map: "idx_payments_order")
+  @@map("payments")
+}
+
+// Gateway-specific data is not mixed into the common payments table.
+model PaymentGatewayTransaction {
+  paymentId             String    @id @map("payment_id") @db.Uuid
+  gatewayOrderId        String?   @unique(map: "ux_payment_gateway_order_id") @map("gateway_order_id") @db.VarChar(128)
+  gatewayTransactionId  String?   @unique(map: "ux_payment_gateway_transaction_id") @map("gateway_transaction_id") @db.VarChar(255)
+  providerRef           String?   @unique(map: "ux_payment_gateway_provider_ref") @map("provider_ref") @db.VarChar(255)
+  checkoutUrl           String?   @map("checkout_url") @db.VarChar(2048)
+  qrContent             String?   @map("qr_content") @db.Text
+  responseCode          String?   @map("response_code") @db.VarChar(50)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_payment_gateway_payment")
+
+  @@map("payment_gateway_transactions")
+}
+
+model LoyaltyTransaction {
+  id                    String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String              @map("user_id") @db.Uuid
+  orderId               String?             @map("order_id") @db.Uuid
+  points                Int
+  type                  LoyaltyType         @map("transaction_type")
+  createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  reversesTransactionId String?             @unique(map: "ux_loyalty_reversal_origin") @map("reverses_transaction_id") @db.Uuid
+  reversedTransaction   LoyaltyTransaction? @relation("LoyaltyReverse", fields: [reversesTransactionId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fk_loyalty_reverses")
+  reversal              LoyaltyTransaction? @relation("LoyaltyReverse")
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_loyalty_user")
+  order Order? @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_loyalty_order")
+
+  @@index([userId], map: "idx_loyalty_user")
+  @@map("loyalty_transactions")
+}
+
+model OrderStatusHistory {
+  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId    String       @map("order_id") @db.Uuid
+  fromStatus OrderStatus? @map("from_status")
+  toStatus   OrderStatus  @map("to_status")
+  changedAt  DateTime     @default(now()) @map("changed_at") @db.Timestamptz(6)
+  changedBy  String?      @map("changed_by") @db.Uuid
+
+  changedByUser User? @relation("OrderStatusChangedBy", fields: [changedBy], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_order_status_history_changed_by")
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_order_status_history_order")
+
+  @@index([orderId], map: "idx_status_history_order")
+  @@index([changedBy], map: "idx_status_history_changed_by")
+  @@map("order_status_history")
+}
+
+model UserVoucher {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  couponId    String    @map("coupon_id") @db.Uuid
+  rewardId    String    @map("reward_id") @db.VarChar(30)
+  requestId   String    @unique @map("request_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  usedAt      DateTime? @map("used_at") @db.Timestamptz(6)
+  usedOrderId String?   @map("used_order_id") @db.Uuid
+  reservedOrderId String? @map("reserved_order_id") @db.Uuid
+
+  user      User   @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_uv_user")
+  coupon    Coupon @relation(fields: [couponId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_uv_coupon")
+  usedOrder Order? @relation("VoucherUsedOrder", fields: [usedOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_uv_used_order")
+  reservedOrder Order? @relation("VoucherReservedOrder", fields: [reservedOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_uv_reserved_order")
+
+  @@unique([userId, couponId], map: "uq_user_vouchers_user_coupon")
+  @@index([userId], map: "idx_user_vouchers_user")
+  @@index([reservedOrderId], map: "idx_user_vouchers_reserved_order")
+  @@map("user_vouchers")
+}
+
+model Ingredient {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String   @unique @db.VarChar(30)
+  name        String   @db.VarChar(255)
+  unit        String   @db.VarChar(10)
+  stockQty    Decimal  @default(0) @map("stock_quantity") @db.Decimal(14, 3)
+  reservedQty Decimal  @default(0) @map("reserved_quantity") @db.Decimal(14, 3)
+  minStockQty Decimal  @default(0) @map("min_stock_quantity") @db.Decimal(14, 3)
+  version     Int      @default(0)
+  isActive    Boolean  @default(true) @map("is_active")
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  productRecipes ProductIngredient[]
+  toppingRecipes ToppingIngredient[]
+  movements      IngredientMovement[]
+  reservations   OrderIngredientReservation[]
+
+  @@map("ingredients")
+}
+
+model ProductIngredient {
+  productId    String  @map("product_id") @db.Uuid
+  size         Size
+  ingredientId String  @map("ingredient_id") @db.Uuid
+  quantity     Decimal @db.Decimal(14, 3)
+
+  productSizePrice ProductSizePrice @relation(fields: [productId, size], references: [productId, size], onDelete: Cascade, onUpdate: NoAction, map: "fk_recipe_product_size")
+
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_recipe_ingredient")
+
+  @@id([productId, size, ingredientId])
+  @@index([ingredientId], map: "idx_recipe_ingredient")
+  @@map("product_ingredients")
+}
+
+model ToppingIngredient {
+  toppingId    String  @map("topping_id") @db.Uuid
+  ingredientId String  @map("ingredient_id") @db.Uuid
+  quantity     Decimal @db.Decimal(14, 3)
+
+  topping    Topping    @relation(fields: [toppingId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_topping_recipe_topping")
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_topping_recipe_ingredient")
+
+  @@id([toppingId, ingredientId])
+  @@index([ingredientId], map: "idx_topping_recipe_ingredient")
+  @@map("topping_ingredients")
+}
+
+model IngredientMovement {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ingredientId    String   @map("ingredient_id") @db.Uuid
+  orderId         String?  @map("order_id") @db.Uuid
+  performedBy     String?  @map("performed_by") @db.Uuid
+  movementType    String   @map("movement_type") @db.VarChar(20)
+  expectedVersion Int      @map("expected_version")
+  quantityChange  Decimal  @map("quantity_change") @db.Decimal(14, 3)
+  stockBefore     Decimal  @map("stock_before") @db.Decimal(14, 3)
+  stockAfter      Decimal  @map("stock_after") @db.Decimal(14, 3)
+  note            String?  @db.Text
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  order      Order?     @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  performer  User?      @relation("IngredientMovementPerformer", fields: [performedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([ingredientId, createdAt], map: "idx_movements_ingredient_date")
+  @@index([orderId], map: "idx_movements_order")
+  @@index([performedBy], map: "idx_movements_performed_by")
+  @@map("ingredient_movements")
+}
+
+// Lưu snapshot lượng nguyên liệu giữ cho từng đơn, để công thức thay đổi vẫn
+// trừ đúng lượng đã giữ khi xác nhận trả tiền.
+model OrderIngredientReservation {
+  orderId      String  @map("order_id") @db.Uuid
+  ingredientId String  @map("ingredient_id") @db.Uuid
+  quantity     Decimal @db.Decimal(14, 3)
+
+  order      Order      @relation(fields: [orderId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([orderId, ingredientId])
+  @@index([ingredientId], map: "idx_order_ingredient_reservations_ingredient")
+  @@map("order_ingredient_reservations")
+}
