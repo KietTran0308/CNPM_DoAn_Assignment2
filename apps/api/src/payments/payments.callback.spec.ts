@@ -25,7 +25,7 @@ describe('ZaloPay callback với bảng payment_gateway_transactions', () => {
                 gatewayTransaction: { gatewayTransactionId: '555' },
             })) },
             order: { findUniqueOrThrow: jest.fn(async () => pending.order) },
-            $transaction: jest.fn(async (fn: (tx: typeof tx) => Promise<unknown>) => fn(tx)),
+            $transaction: jest.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
         };
         const svc = new PaymentsService(prisma as any,
             { verifyCallback: jest.fn(() => data) } as any, {} as any);

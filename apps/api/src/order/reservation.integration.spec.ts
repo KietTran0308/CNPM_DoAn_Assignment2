@@ -89,7 +89,7 @@ test('Giữ trước tài nguyên trong giao dịch chờ thanh toán', () => {
         const orders = new OrdersService(db as PrismaService, new PricingService());
         const payments = new PaymentsService(db as PrismaService, {} as ZalopayService, orders);
         const dto = {
-            items: [{ productId, size: Size.M as const, qty: 1 }],
+            items: [{ productId, size: Size.M, qty: 1 }],
             couponCode: (await db.coupon.findUniqueOrThrow({ where: { id: couponId } })).code,
             pointsToUse: 2,
         };
