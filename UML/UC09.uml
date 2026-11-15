@@ -1,0 +1,76 @@
+@startuml
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 16
+skinparam maxMessageSize 400
+title UC-09: Thanh toán đơn hàng không tiền mặt
+autonumber
+
+actor "Khách hàng" as C
+boundary "Next.js UI" as UI
+control "NestJS API" as API
+database "Database\n(PostgreSQL)" as DB
+participant "Payment\nService" as PS
+
+note over C, PS : Tiền điều kiện: đã đăng nhập, đơn ở trạng thái PENDING (từ UC-06)
+
+C -> UI : Chọn phương thức (Ví/Thẻ), nhấn "Xác nhận thanh toán"
+activate UI
+UI -> API : POST /payments {orderId, method}\n(Bearer JWT, Idempotency-Key)
+activate API
+API -> API : Xác thực JWT, validate dữ liệu & Idempotency-Key
+
+alt JWT / dữ liệu không hợp lệ
+    API --> UI : 401 / 400
+    UI --> C : Hiển thị thông báo lỗi
+else Hợp lệ
+    API -> DB : Tìm payment theo Idempotency-Key
+    activate DB
+    DB --> API : payment hoặc null
+    deactivate DB
+
+    alt Key đã tồn tại (client gửi lại)
+        API --> UI : Trả kết quả đã lưu (replay)\nhoặc 409 nếu khác yêu cầu
+        UI --> C : Hiển thị kết quả cũ, không trừ tiền/điểm lần 2
+    else Key mới
+        API -> DB : Đọc đơn, kiểm tra chủ đơn, hạn thanh toán, trạng thái
+        activate DB
+        DB --> API : Order
+        deactivate DB
+
+        API -> PS : Tạo giao dịch (orderId, amount, method)
+        activate PS
+        PS --> API : Kết quả (SUCCESS / FAILED)
+        deactivate PS
+
+        alt Thanh toán thành công
+            API -> DB : BEGIN TRANSACTION (Serializable)
+            activate DB
+            API -> DB : Trừ nguyên liệu (optimistic lock) + ghi movement
+            alt Đủ nguyên liệu
+                API -> DB : Order → PAID + status history
+                API -> DB : Dùng coupon/voucher, trừ điểm (REDEEM)
+                API -> DB : Lưu payment SUCCESS, cộng điểm (EARN, UC-11)
+                API -> DB : COMMIT
+                deactivate DB
+                API --> UI : 201 {order PAID, earnedPoints}
+                UI --> C : Màn hình xác nhận đơn (UC-10), +điểm thưởng
+            else Thiếu nguyên liệu / tồn kho vừa đổi
+                API -> DB : ROLLBACK
+                deactivate DB
+                API --> UI : 409 Conflict
+                UI --> C : Thông báo lỗi, giữ nguyên giỏ hàng
+            end
+        else Thanh toán thất bại
+            API -> DB : Order → PAYMENT_FAILED + history, lưu payment FAILED
+            activate DB
+            DB --> API : OK
+            deactivate DB
+            API --> UI : 201 {order PAYMENT_FAILED}
+            UI --> C : Thông báo thất bại, cho phép "Thử lại" hoặc "Hủy đơn"
+        end
+    end
+end
+deactivate API
+deactivate UI
+@enduml

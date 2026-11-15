@@ -1,0 +1,88 @@
+@startuml UC14_Cap_Nhat_Trang_Thai_Pha_Che
+title UC14 - Cập nhật trạng thái pha chế
+autonumber
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
+
+actor    "Barista"                      as BR
+actor    "Khách hàng"                   as KH
+boundary "Màn hình Quản lý pha chế"     as BS
+boundary "LichSuDon / DatHangThanhCong" as UI
+control  "OrdersController"             as OC
+control  "OrdersService"                as OS
+entity   "Order"                        as OD
+entity   "OrderStatusHistory"           as SH
+database "PostgreSQL"                   as DB
+
+note over BR, BS : Tiền điều kiện: Barista đã đăng nhập (UC07),\nđơn đã được tiếp nhận (UC13, trạng thái PREPARING)
+
+BR -> BS ++ : Chọn đơn đang thực hiện trên danh sách pha chế
+ref over BR, BS : UC13 - PAID -> PREPARING (bắt đầu làm món)
+
+loop Cập nhật tiến độ: PREPARING -> READY -> COMPLETED
+    alt Pha chế xong
+        BR -> BS : Nhấn "Đã xong / Mời nhận nước"
+    else Khách đã nhận nước tại quầy
+        BR -> BS : Nhấn "Hoàn tất / Đã giao"
+    end
+
+    BS -> OC ++ : PATCH /orders/{id}/status {status: READY hoặc COMPLETED}
+    OC -> OC : JwtGuard, ParseUUIDPipe, ValidationPipe\n(status in PREPARING, READY, COMPLETED)
+    OC -> OS ++ : changeStatus(id, status, role, userId)
+
+    alt role không phải ADMIN / STAFF
+        OS --> OC : ForbiddenException
+        OC --> BS : 403
+    else Có quyền
+        OS -> DB : BEGIN (Serializable)
+        OS -> OD ++ : order.findUnique(id)
+        OD -> DB ++ : SELECT orders
+        DB --> OD -- : order
+        OD --> OS -- : order
+        OS -> OS : assertTransition(trạng thái hiện tại, trạng thái mới)
+
+        alt Chuyển trạng thái sai (vd: READY -> PREPARING, nhấn nhầm)
+            OS --> OC : BadRequestException
+            OC --> BS : 400 "Không thể chuyển đơn từ ... sang ..."
+            BS --> BR : Thông báo lỗi
+        else Hợp lệ
+            OS -> OD ++ : order.updateMany(where id AND status cũ, data status mới)
+            OD -> DB ++ : UPDATE orders
+            DB --> OD -- : count
+            OD --> OS -- : count
+
+            alt count != 1 (đơn vừa bị đổi bởi yêu cầu khác)
+                OS -> DB : ROLLBACK
+                OS --> OC : ConflictException
+                OC --> BS : 409 "Trạng thái đơn đã bị thay đổi"
+            else Cập nhật thành công
+                opt status = COMPLETED
+                    ref over OS, OD : «extend» UC11 - Cộng điểm thưởng (EARN)
+                end
+                OS -> SH ++ : orderStatusHistory.create(from, to)
+                SH -> DB ++ : INSERT order_status_history
+                DB --> SH --
+                SH --> OS --
+                OS -> DB : COMMIT
+                OS --> OC : order (trạng thái mới)
+                OC --> BS : 200 OK
+                BS --> BR : Cập nhật trạng thái trên màn hình
+            end
+        end
+    end
+    deactivate OS
+    deactivate OC
+end
+deactivate BS
+
+== Khách hàng nhận thông báo / theo dõi ==
+KH -> UI ++ : Mở / làm mới màn hình theo dõi đơn
+UI -> OC ++ : GET /orders/me
+OC --> UI -- : orders[] (trạng thái mới)
+alt Đơn READY
+    UI --> KH : "Đồ uống đã pha xong. Mời đến quầy đọc mã đơn #... để nhận nước"
+else Đơn COMPLETED
+    UI --> KH : "Đơn hàng đã được bàn giao hoàn tất"
+end
+deactivate UI
+@enduml

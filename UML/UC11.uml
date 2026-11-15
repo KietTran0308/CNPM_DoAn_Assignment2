@@ -1,0 +1,90 @@
+@startuml
+title UC11 - Tích điểm thưởng («extend» UC09 - Thanh toán không tiền mặt)
+autonumber
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
+
+actor    "Khách hàng / Hệ thống"                         as KH
+boundary "LichSuDon.tsx /\nDatHangThanhCong.tsx"         as UI
+boundary "api.ts"                                        as API
+control  "JwtAuthGuard"                                  as JG
+control  "OrdersController"                              as OC
+control  "OrdersService"                                 as OS
+control  "RewardsController"                             as RC
+database "PostgreSQL\n(orders, users, loyalty_transactions)" as DB
+
+note over KH : Tiền điều kiện: thanh toán UC09 thành công.\nTheo code, điểm EARN chỉ được cộng khi đơn chuyển READY -> COMPLETED\n(PaymentsService trả earnedPoints = 0)
+
+== Bước 1: Kích hoạt khi đơn hoàn tất ==
+KH -> UI ++ : Nhấn "Đã nhận nước" (đơn READY)
+UI -> API ++ : transitionOrderStatus(orderId, COMPLETED)
+API -> JG ++ : PATCH /orders/:id/status\nBearer JWT, body {status: COMPLETED}
+alt Token thiếu / không hợp lệ / hết hạn
+    JG --> API : 401 Unauthorized
+    API --> UI : Lỗi xác thực
+    UI --> KH : Yêu cầu đăng nhập lại
+else Token hợp lệ
+    JG -> OC ++ : request.user = {id, email, role}
+    OC -> OS ++ : changeStatus(orderId, COMPLETED, role, performedBy)
+    alt role không phải ADMIN / STAFF
+        OS --> OC : ForbiddenException
+        OC --> API : 403 Bạn không có quyền cập nhật đơn hàng
+        API --> UI : Lỗi
+        UI --> KH : Thông báo không đủ quyền
+    else role hợp lệ
+        OS -> DB : BEGIN TRANSACTION (Serializable)
+        activate DB
+        OS -> DB : order.findUnique(orderId)
+        DB --> OS : order
+        OS -> OS : assertTransition(READY -> COMPLETED)
+        OS -> DB : order.updateMany(status = READY) -> COMPLETED
+        alt Trạng thái đơn đã bị thay đổi (count != 1)
+            OS -> DB : ROLLBACK
+            OS --> OC : ConflictException
+            OC --> API : 409 Trạng thái đơn đã bị thay đổi
+            API --> UI : Lỗi
+            UI --> KH : Thông báo lỗi
+        else Cập nhật thành công
+            == Bước 2-3: Kiểm tra quy tắc quy đổi và tính điểm ==
+            OS -> OS : earnedPoints = floor(order.total / 10.000)\n(tính trên số tiền thực trả)
+            alt earnedPoints > 0
+                == Bước 3: Cộng điểm vào ví thành viên ==
+                OS -> DB : user.update(loyaltyPoints += earnedPoints)
+                OS -> DB : loyaltyTransaction.create(type = EARN, points, orderId)
+            else earnedPoints = 0
+                note over OS : Không cộng điểm\n(đơn dưới 10.000đ)
+            end
+            OS -> DB : orderStatusHistory.create(READY -> COMPLETED)
+            OS -> DB : COMMIT
+            OS --> OC : order (status = COMPLETED)
+            OC --> API : 200 OK
+            API --> UI : {order, message}
+            UI --> KH : Thông báo hoàn tất và số điểm vừa tích lũy (+N điểm)
+        end
+        deactivate DB
+    end
+    deactivate OS
+    deactivate OC
+end
+deactivate JG
+deactivate API
+deactivate UI
+
+== Luồng ngoại lệ ==
+opt Xung đột đồng thời (Prisma P2034)
+    OS --> OC : ConflictException "Đơn đã thay đổi, vui lòng thử lại"
+    note right of OS : Spec: đưa vào Queue để cộng bù sau.
+end
+
+== Xem lịch sử biến động điểm ==
+opt Khách hàng xem lịch sử điểm
+    KH -> UI ++ : Mở lịch sử điểm
+    UI -> API ++ : GET /rewards/history
+    API -> RC ++ : history(userId)
+    RC -> DB ++ : loyaltyTransaction.findMany(userId, orderBy createdAt desc)
+    DB --> RC -- : danh sách EARN / REDEEM / REVERSAL
+    RC --> API -- : danh sách biến động điểm
+    API --> UI -- : danh sách
+    UI --> KH -- : Hiển thị lịch sử biến động điểm
+end
+@enduml

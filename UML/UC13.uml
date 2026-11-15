@@ -1,0 +1,108 @@
+@startuml UC13_Tiep_Nhan_Don
+title UC13 - Tiếp nhận đơn
+autonumber
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
+
+actor    "Barista"                               as BR
+boundary "Màn hình Quản lý pha chế"              as BS
+control  "OrdersController"                      as OC
+control  "OrdersService"                         as OS
+entity   "Order / StatusHistory"                 as OD
+entity   "ProductIngredient / ToppingIngredient" as RC
+entity   "Ingredient"                            as IG
+entity   "IngredientMovement"                    as IM
+database "PostgreSQL"                            as DB
+
+note over BR, BS : Tiền điều kiện: Barista đã đăng nhập (UC07, role STAFF/ADMIN),\ncó đơn ở trạng thái PAID ("Chờ tiếp nhận")
+
+BR -> BS ++ : Mở màn hình Quản lý pha chế
+
+== Xem đơn mới ==
+BS -> OC ++ : GET /orders?status=PAID (làm mới định kỳ)
+OC --> BS -- : Danh sách đơn PAID
+BS --> BR : Phát âm thanh thông báo, hiển thị đơn mới
+BR -> BS : Xem chi tiết đơn (món, size, topping, đường/đá, ghi chú)
+
+== Tiếp nhận đơn ==
+BR -> BS : Nhấn "Tiếp nhận đơn"
+BS -> OC ++ : PATCH /orders/{id}/status {status: PREPARING}
+OC -> OC : JwtGuard, ParseUUIDPipe, ValidationPipe
+OC -> OS ++ : changeStatus(id, PREPARING, role, userId)
+
+alt role không phải ADMIN / STAFF
+    OS --> OC : ForbiddenException
+    OC --> BS : 403 "Bạn không có quyền cập nhật đơn hàng"
+else Có quyền
+    OS -> DB : BEGIN (Serializable)
+    OS -> OD ++ : order.findUnique(id)
+    OD -> DB ++ : SELECT orders
+    DB --> OD -- : order
+    OD --> OS -- : order
+
+    alt Không tìm thấy đơn
+        OS --> OC : NotFoundException
+        OC --> BS : 404
+    else Không phải PAID -> PREPARING
+        OS --> OC : BadRequestException
+        OC --> BS : 400 "Không thể chuyển đơn từ ... sang ..."
+    else Hợp lệ
+        OS -> IM ++ : Kiểm tra đã xuất kho chưa (CONSUMPTION)
+        IM -> DB ++ : SELECT ingredient_movements
+        DB --> IM -- : movement | null
+        IM --> OS -- : movement | null
+
+        alt Đã xuất kho trước đó
+            OS --> OC : ConflictException
+            OC --> BS : 409 "Đơn hàng đã được xuất nguyên liệu"
+        else Chưa xuất
+            loop Mỗi món và topping trong đơn
+                OS -> RC ++ : Lấy công thức theo (sản phẩm, size) và topping
+                RC -> DB ++ : SELECT recipes
+                DB --> RC -- : recipes
+                RC --> OS -- : recipes (nhân với qty, servings)
+            end
+
+            loop Mỗi nguyên liệu (theo thứ tự cố định)
+                OS -> IG ++ : ingredient.findUnique(id)
+                IG -> DB ++ : SELECT ingredients
+                DB --> IG -- : ingredient
+                IG --> OS -- : ingredient
+
+                alt Tồn kho < lượng cần
+                    OS -> DB : ROLLBACK
+                    OS --> OC : ConflictException
+                    OC --> BS : 409 "Không đủ nguyên liệu ..."
+                    BS --> BR : Báo thiếu nguyên liệu
+                    BR -> BR : Liên hệ khách đổi món hoặc xử lý hoàn tiền
+                else Đủ nguyên liệu
+                    OS -> IG ++ : updateMany(trừ kho, version + 1) [optimistic lock]
+                    IG -> DB ++ : UPDATE ingredients
+                    DB --> IG -- : count
+                    IG --> OS -- : count
+                    OS -> IM ++ : ingredientMovement.create(CONSUMPTION, stockBefore, stockAfter)
+                    IM -> DB ++ : INSERT ingredient_movements
+                    DB --> IM --
+                    IM --> OS --
+                end
+            end
+
+            OS -> OD ++ : order.updateMany(status = PREPARING)
+            OD -> DB ++ : UPDATE orders
+            DB --> OD -- : count
+            OD --> OS -- : count
+            OS -> OD ++ : orderStatusHistory.create(PAID -> PREPARING)
+            OD -> DB ++ : INSERT order_status_history
+            DB --> OD --
+            OD --> OS --
+            OS -> DB : COMMIT
+            OS --> OC : order (PREPARING)
+            OC --> BS : 200 OK
+            BS --> BR : Đơn chuyển "Đang chuẩn bị"
+        end
+    end
+end
+deactivate OS
+deactivate OC
+deactivate BS
+@enduml

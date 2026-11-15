@@ -1,0 +1,85 @@
+@startuml UC04_Chon_Size_Topping
+title UC04 - Chọn Size/Topping («extend» UC03)
+autonumber
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
+
+actor    "Khách hàng"                 as KH
+boundary "ProductDetailScreen"        as UI
+control  "ProductsController"         as PC
+control  "ProductsService"            as PS
+entity   "ProductSizePrice"           as SZ
+entity   "Topping"                    as TP
+control  "CartStore (useGioHang)"     as CS
+database "PostgreSQL"                 as DB
+
+note over KH, UI : Tiền điều kiện: đang ở màn hình\nchi tiết sản phẩm (UC03), sản phẩm còn bán
+
+== Tải tùy chọn Size/Topping ==
+activate UI
+UI -> PC : GET /products/{id}/options
+activate PC
+PC -> PS : getOptions(id)
+activate PS
+PS -> PS : findById(id)
+par Lấy song song
+    PS -> SZ : productSizePrice.findMany(productId)
+    activate SZ
+    SZ -> DB : SELECT product_size_prices
+    DB --> SZ : sizes[]
+    SZ --> PS : sizes[] (S, M, L)
+    deactivate SZ
+else
+    PS -> TP : topping.findMany(isActive = true)
+    activate TP
+    TP -> DB : SELECT toppings
+    DB --> TP : toppings[]
+    TP --> PS : toppings[]
+    deactivate TP
+end
+PS --> PC : { sizes, toppings }
+deactivate PS
+PC --> UI : 200 OK, { sizes, toppings }
+deactivate PC
+UI --> KH : Hiển thị Size, Topping, mức đường/đá
+
+== Chọn tùy chỉnh ==
+alt Khách hàng thay đổi tùy chọn
+    KH -> UI : Chọn Size (S / M / L)
+    UI -> UI : Cập nhật size, tính lại đơn giá
+
+    loop Với mỗi Topping khách muốn thêm
+        KH -> UI : Chọn / bỏ chọn Topping
+        alt Topping còn bán
+            UI -> UI : Cập nhật danh sách topping,\ntính lại đơn giá
+        else Topping đã hết / ngừng bán
+            UI --> KH : Làm mờ topping, thông báo hết topping
+        end
+    end
+
+    KH -> UI : Chọn mức đường / mức đá
+    UI -> UI : Tính đơn giá = giá size + tổng giá topping,\ntổng tạm tính = đơn giá x số lượng
+    UI --> KH : Hiển thị giá đã cập nhật
+else Giữ nguyên Size mặc định, không chọn Topping
+    UI --> KH : Giữ nguyên giá của size mặc định
+end
+
+== Xác nhận thêm vào giỏ ==
+KH -> UI : Nhấn "Thêm vào giỏ"
+alt Số lượng vượt tồn kho
+    UI --> KH : Thông báo đã đạt tồn kho tối đa
+else Hợp lệ
+    UI -> CS : addToCart(cartLine)
+    activate CS
+    CS -> CS : So khớp dòng cũ (món, size, topping,\nđường, đá, ghi chú)
+    alt Đã có dòng trùng cấu hình
+        CS -> CS : Cộng dồn số lượng, cập nhật lineTotal
+    else Chưa có
+        CS -> CS : Thêm dòng mới vào giỏ
+    end
+    CS --> UI : cartLines đã cập nhật
+    deactivate CS
+    UI --> KH : Quay lại Menu, số món trong giỏ được cập nhật
+end
+deactivate UI
+@enduml
