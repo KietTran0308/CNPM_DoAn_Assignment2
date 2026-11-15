@@ -1,0 +1,68 @@
+@startuml
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 16
+skinparam maxMessageSize 400
+title UC-06: Tạo đơn hàng
+autonumber
+
+actor "Khách hàng" as C
+boundary "Next.js UI" as UI
+control "NestJS API" as API
+database "Database\n(PostgreSQL)" as DB
+
+note over C, DB : Tiền điều kiện: giỏ hàng có ít nhất 1 sản phẩm
+
+C -> UI : Chọn "Tiến hành thanh toán"
+
+alt Chưa đăng nhập (include UC-07)
+    UI --> C : Chuyển sang màn hình Đăng nhập, giữ nguyên giỏ hàng
+else Đã đăng nhập
+    C -> UI : Chọn phương thức nhận, mã khuyến mãi (UC-08), điểm thưởng, xác nhận đặt đơn
+    UI -> API : POST /orders {items, couponCode, pointsToUse}\n(Bearer JWT, Idempotency-Key)
+    activate API
+    API -> API : Xác thực JWT, validate DTO, kiểm tra Idempotency-Key (8-128 ký tự)
+
+    alt JWT / dữ liệu không hợp lệ
+        API --> UI : 401 / 400
+        UI --> C : Hiển thị thông báo lỗi
+    else Hợp lệ
+        API -> DB : Tìm đơn theo Idempotency-Key
+        DB --> API : Order hoặc null
+
+        alt Key đã tồn tại (client gửi lại)
+            API --> UI : Trả đơn đã tạo (cùng user, cùng request hash)\nhoặc 409 nếu khác yêu cầu
+            UI --> C : Tiếp tục với đơn cũ, không tạo đơn trùng
+        else Key mới
+            API -> DB : BEGIN TRANSACTION (Serializable)
+            loop Mỗi món trong giỏ
+                API -> DB : Kiểm tra sản phẩm đang bán, giá theo size, topping hợp lệ
+                DB --> API : Giá size, giá topping
+                API -> API : Tính đơn giá và thành tiền (server tự tính)
+            end
+
+            opt Có mã khuyến mãi
+                API -> DB : Kiểm tra coupon (hiệu lực, lượt dùng, giá trị tối thiểu, voucher sở hữu)
+                DB --> API : Coupon / voucher
+            end
+            opt Có dùng điểm thưởng
+                API -> DB : Kiểm tra điểm tích lũy của khách
+                DB --> API : loyaltyPoints
+            end
+
+            alt Món/topping, coupon hoặc điểm không hợp lệ
+                API -> DB : ROLLBACK
+                API --> UI : 400 / 403 (thông báo lỗi cụ thể)
+                UI --> C : Hiển thị lỗi, yêu cầu cập nhật giỏ hàng / bỏ mã
+            else Hợp lệ
+                API -> DB : Tạo Order (PENDING, hạn 20 phút) + OrderItems + Toppings + status history
+                DB --> API : orderId, orderCode, total
+                API -> DB : COMMIT
+                API --> UI : 201 {id, orderCode, status: PENDING, total}
+                UI --> C : Hiển thị tổng tiền chính thức, chuyển sang thanh toán (UC-09)
+            end
+        end
+    end
+    deactivate API
+end
+@enduml

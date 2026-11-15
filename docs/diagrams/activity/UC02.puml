@@ -1,0 +1,62 @@
+@startuml
+title UC02 - Xem Menu
+autonumber
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
+
+actor    "Khách hàng"                    as KH
+boundary "MenuScreen"                    as UI
+control  "ProductsController"            as PC
+control  "ProductsService"               as PS
+entity   "Product / ProductSizePrice"    as EN
+database "PostgreSQL"                    as DB
+
+KH -> UI : Truy cập màn hình Trang chủ / Menu
+activate UI
+UI -> PC : GET /products
+activate PC
+PC -> PS : findAll()
+activate PS
+PS -> EN : product.findMany(isActive = true,\nkèm sizePrices, orderBy name asc)
+activate EN
+EN -> DB : SELECT products + product_size_prices
+activate DB
+
+alt Truy vấn thành công
+    DB --> EN : Danh sách sản phẩm đang bán
+    deactivate DB
+    EN --> PS : products[]
+    deactivate EN
+    PS --> PC : products[]
+    deactivate PS
+    PC --> UI : 200 OK, products[]
+    deactivate PC
+
+    alt Có sản phẩm
+        UI --> KH : Hiển thị danh mục, tên, hình ảnh, giá cơ bản
+        opt Khách hàng lọc theo danh mục / tìm kiếm từ khóa
+            KH -> UI : Chọn danh mục hoặc nhập từ khóa
+            UI -> UI : Lọc danh sách theo category / name
+            alt Có kết quả phù hợp
+                UI --> KH : Hiển thị danh sách đã lọc
+            else Không có kết quả
+                UI --> KH : "Không tìm thấy sản phẩm phù hợp"
+            end
+        end
+    else Danh sách rỗng
+        UI --> KH : Hiển thị menu trống
+    end
+
+else Lỗi kết nối máy chủ / CSDL
+    DB --> EN : Lỗi
+    EN --> PS : Exception
+    PS --> PC : Exception
+    PC --> UI : 500 Internal Server Error
+    UI --> KH : "Không thể tải Menu" + nút "Thử lại"
+    opt Khách hàng nhấn "Thử lại"
+        KH -> UI : Nhấn "Thử lại"
+        UI -> PC : GET /products
+    end
+end
+deactivate UI
+@enduml

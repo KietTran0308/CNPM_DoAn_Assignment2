@@ -1,0 +1,90 @@
+@startuml
+title UC03 - Xem chi tiết sản phẩm
+autonumber
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
+
+actor    "Khách hàng"                 as KH
+boundary "ProductDetailScreen"        as UI
+control  "ProductsController"         as PC
+control  "ProductsService"            as PS
+entity   "Product / ProductSizePrice" as EN
+entity   "Topping"                    as TP
+database "PostgreSQL"                 as DB
+
+KH -> UI : Chạm vào một sản phẩm trên Menu
+activate UI
+UI -> PC : GET /products/{id}
+activate PC
+PC -> PC : ParseUUIDPipe kiểm tra id
+
+alt id không phải UUID hợp lệ
+    PC --> UI : 400 Bad Request
+    UI --> KH : Thông báo lỗi, quay lại Menu
+else id hợp lệ
+    PC -> PS : findById(id)
+    activate PS
+    PS -> EN : product.findFirst(id, isActive = true,\ninclude sizePrices orderBy size asc)
+    activate EN
+    EN -> DB : SELECT products + product_size_prices
+    activate DB
+    DB --> EN : Kết quả truy vấn
+    deactivate DB
+    EN --> PS : product | null
+    deactivate EN
+
+    alt Sản phẩm tồn tại và đang bán
+        PS --> PC : product
+        deactivate PS
+        PC --> UI : 200 OK, product
+        deactivate PC
+        UI --> KH : Hiển thị hình ảnh, tên món, giá, mô tả,\ncác tùy chọn Size/Topping, nút "Thêm vào giỏ hàng"
+
+        opt Tải tùy chọn Size/Topping
+            UI -> PC : GET /products/{id}/options
+            activate PC
+            PC -> PS : getOptions(id)
+            activate PS
+            PS -> PS : findById(id)
+            par Lấy song song
+                PS -> EN : productSizePrice.findMany(productId)
+                activate EN
+                EN -> DB : SELECT product_size_prices
+                DB --> EN : sizes[]
+                EN --> PS : sizes[]
+                deactivate EN
+            else
+                PS -> TP : topping.findMany(isActive = true)
+                activate TP
+                TP -> DB : SELECT toppings
+                DB --> TP : toppings[]
+                TP --> PS : toppings[]
+                deactivate TP
+            end
+            PS --> PC : { sizes, toppings }
+            deactivate PS
+            PC --> UI : 200 OK, { sizes, toppings }
+            deactivate PC
+            UI --> KH : Hiển thị danh sách Size và Topping
+        end
+
+        opt Khách hàng chọn Size/Topping (mở rộng)
+            KH -> UI : Chọn Size/Topping
+            ref over KH, UI : «extend» UC04 - Chọn Size/topping
+        end
+
+        opt Khách hàng nhấn "Thêm vào giỏ hàng"
+            KH -> UI : Nhấn "Thêm vào giỏ hàng"
+            UI --> KH : Thêm món vào giỏ hàng
+        end
+
+    else Món ngừng bán / không tồn tại (hết hàng)
+        PS --> PC : NotFoundException("Không tìm thấy món")
+        deactivate PS
+        PC --> UI : 404 Not Found
+        deactivate PC
+        UI --> KH : Hiển thị "Tạm hết hàng",\nvô hiệu hóa nút đặt mua
+    end
+end
+deactivate UI
+@enduml

@@ -1,0 +1,80 @@
+@startuml UC10_Xem_Xac_Nhan_Don
+title UC10 - Xem xác nhận đơn (được include bởi UC09)
+autonumber
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
+
+actor    "Khách hàng"                                  as KH
+boundary "page.tsx"                                    as PG
+boundary "DatHangThanhCong.tsx\n(Màn hình xác nhận đơn)" as DH
+boundary "TienTrinhDon\n(Thanh tiến trình)"            as TT
+boundary "LichSuDon.tsx"                               as LS
+boundary "api.ts"                                      as API
+control  "JwtAuthGuard"                                as JG
+control  "OrdersController"                            as OC
+control  "OrdersService"                               as OS
+database "PostgreSQL\n(Prisma)"                        as DB
+
+== Điều kiện: UC09 đã thanh toán thành công ==
+note over PG : processPayment trả status = PAID\nđã clearCart(), setLastOrder(paidOrder)
+
+== Bước 1: Tự động chuyển sang màn hình Xác nhận đơn hàng ==
+PG -> DH ++ : setManHinhHienTai('success')\ntruyền lastOrder, user
+
+== Bước 2: Hiển thị thông tin xác nhận ==
+DH -> DH : maDon = lastOrder.id\ntrangThai = lastOrder.status (PAID)\ndiemCongThem = floor(total / 10.000)
+DH -> TT : Hiển thị tiến trình (status = PAID)
+TT --> DH : Bước 1/4 - Đã nhận, chuyển quầy
+DH --> KH : Hiển thị: "Đặt đơn hàng thành công",\nmã đơn, trạng thái "Đã thanh toán",\ntiến trình đơn, điểm thưởng đơn này
+
+== Bước 3: Thông báo đẩy ==
+note over DH : Spec: gửi Push Notification xác nhận đơn.
+
+== Luồng thay thế ==
+alt Khách hàng nhấn "Về thực đơn chính"
+    KH -> DH : Nhấn "Về thực đơn chính"
+    DH -> PG : onBackToMenu()
+    PG -> PG : setStatusNotice(null)\nsetManHinhHienTai('menu')
+    PG --> KH : Hiển thị Trang chủ / Menu
+else Khách hàng nhấn "Theo dõi lịch sử đơn hàng"
+    KH -> DH : Nhấn "Theo dõi lịch sử đơn hàng"
+    DH -> PG : onViewHistory()
+    PG -> PG : taiLichSuDon()\nsetHistoryLoading(true)
+    PG -> API ++ : getMyOrders()
+    API -> JG ++ : GET /orders/me\nBearer JWT
+    alt Token thiếu / không hợp lệ / hết hạn
+        JG --> API : 401 Unauthorized
+        API --> PG : Lỗi xác thực
+    else Token hợp lệ
+        JG -> OC ++ : request.user = {id, email, role}
+        OC -> OS ++ : mine(userId)
+        OS -> DB ++ : order.findMany(userId, orderBy createdAt desc,\ninclude user, coupon, payments, statusHistory,\norderItems + product + toppings)
+        DB --> OS -- : danh sách đơn
+        OS --> OC -- : danh sách đơn
+        OC --> API -- : 200 OK
+        API --> PG : orders (mapOrder)
+    end
+    deactivate JG
+    deactivate API
+    PG -> LS ++ : setManHinhHienTai('history')\ntruyền orderHistory
+    LS --> KH -- : Hiển thị danh sách đơn mới nhất trước\n(mã đơn, ngày đặt, tổng tiền, trạng thái, tiến trình)
+end
+deactivate DH
+
+== Luồng ngoại lệ: mất kết nối ngay sau khi trừ tiền ==
+opt Mất mạng / đóng ứng dụng trước khi thấy xác nhận
+    KH -> PG : Mở lại ứng dụng
+    PG -> PG : getStoredToken() còn hiệu lực -> màn hình Menu
+    KH -> PG : Chọn "Lịch sử đơn hàng"
+    PG -> API ++ : getMyOrders()
+    API -> OC ++ : GET /orders/me
+    OC -> OS ++ : mine(userId)
+    OS -> DB ++ : order.findMany(userId)
+    DB --> OS -- : đơn đã thanh toán (status = PAID)
+    OS --> OC -- : danh sách đơn
+    OC --> API -- : orders
+    API --> PG -- : orders
+    PG -> LS ++ : Hiển thị lịch sử
+    LS --> KH -- : Đơn vừa thanh toán xuất hiện trong mục Lịch sử đơn\n(đồng bộ lại thông tin xác nhận)
+end
+@enduml

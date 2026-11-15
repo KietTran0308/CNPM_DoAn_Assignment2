@@ -1,0 +1,107 @@
+@startuml UC05_Quan_Ly_Gio_Hang
+title UC05 - Quản lý giỏ hàng
+autonumber
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
+
+actor    "Khách hàng"             as KH
+boundary "GioHang (CartScreen)"   as UI
+boundary "ModalSuaMon"            as MD
+control  "CartStore (useGioHang)" as CS
+entity   "CartLine"               as CL
+database "localStorage"           as LS
+
+KH -> UI : Nhấn biểu tượng Giỏ hàng
+activate UI
+UI -> CS : Lấy cartLines, getRawSubtotal(), getTotalCartPrice()
+activate CS
+CS -> CL : Đọc danh sách dòng món
+activate CL
+CL --> CS : cartLines[]
+deactivate CL
+CS --> UI : cartLines, tổng tiền tạm tính
+deactivate CS
+
+alt Giỏ hàng trống
+    UI --> KH : "Giỏ hàng của bạn đang trống" + nút quay lại thực đơn
+else Có món trong giỏ
+    UI --> KH : Hiển thị danh sách món (Size, Topping, số lượng,\nđơn giá) và tổng tiền tạm tính
+
+    loop Khách hàng thao tác với giỏ hàng
+        alt Tăng / giảm số lượng
+            KH -> UI : Nhấn "+" hoặc "-"
+            UI -> CS : updateCartQty(itemId, delta)
+            activate CS
+            alt Tăng và tổng số lượng món vượt tồn kho
+                CS --> UI : Giữ nguyên dòng (không đổi)
+                UI --> KH : Nút "+" bị vô hiệu hóa / cảnh báo giới hạn đặt hàng
+            else Số lượng sau khi đổi <= 0
+                CS -> CL : Xóa dòng khỏi giỏ
+                CS -> LS : Lưu giỏ hàng (persist)
+                CS --> UI : cartLines đã cập nhật
+            else Hợp lệ
+                CS -> CL : Cập nhật qty, lineTotal = unitPrice x qty
+                CS -> LS : Lưu giỏ hàng (persist)
+                CS --> UI : cartLines đã cập nhật
+            end
+            deactivate CS
+
+        else Chỉnh sửa tùy chọn món
+            KH -> UI : Nhấn "Tùy chỉnh"
+            UI -> MD : Mở hộp thoại (size, topping, đường, đá, ghi chú, số lượng)
+            activate MD
+            MD --> KH : Hiển thị tùy chọn hiện tại
+            KH -> MD : Thay đổi tùy chọn
+            MD -> MD : Tính lại đơn giá = giá gốc + size + topping
+
+            alt Khách nhấn "Lưu thay đổi"
+                KH -> MD : Nhấn "Lưu thay đổi"
+                MD -> CS : updateCartItem(itemId, dữ liệu mới)
+                activate CS
+                CS -> CL : Gộp dữ liệu mới vào dòng hiện tại
+                alt Trùng cấu hình với dòng khác trong giỏ
+                    CS -> CL : Cộng dồn số lượng (tối đa bằng tồn kho),\nxóa dòng cũ
+                else Không trùng
+                    CS -> CL : Cập nhật dòng, tính lại lineTotal
+                end
+                CS -> LS : Lưu giỏ hàng (persist)
+                CS --> UI : cartLines đã cập nhật
+                deactivate CS
+                MD --> UI : Đóng hộp thoại
+                UI --> KH : Thông báo "Đã lưu thay đổi tùy chọn món"
+            else Khách nhấn "Hủy" / "Đóng"
+                KH -> MD : Nhấn "Hủy"
+                MD --> UI : Đóng hộp thoại, giữ nguyên giỏ
+            end
+            deactivate MD
+
+        else Xóa một món
+            KH -> UI : Nhấn "Xóa"
+            UI -> CS : removeCartItem(itemId)
+            activate CS
+            CS -> CL : Xóa dòng khỏi giỏ
+            CS -> LS : Lưu giỏ hàng (persist)
+            CS --> UI : cartLines đã cập nhật
+            deactivate CS
+
+        else Xóa tất cả
+            KH -> UI : Nhấn "Xóa tất cả"
+            UI -> CS : clearCart()
+            activate CS
+            CS -> CL : Xóa toàn bộ dòng, bỏ mã khuyến mãi
+            CS -> LS : Lưu giỏ hàng (persist)
+            CS --> UI : giỏ rỗng
+            deactivate CS
+        end
+
+        UI -> CS : getRawSubtotal(), getTotalCartPrice()
+        CS --> UI : Tổng tiền tạm tính mới
+        alt Giỏ còn món
+            UI --> KH : Cập nhật danh sách và tổng tiền ngay lập tức
+        else Giỏ đã trống
+            UI --> KH : "Giỏ hàng của bạn đang trống"
+        end
+    end
+end
+deactivate UI
+@enduml

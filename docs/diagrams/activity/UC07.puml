@@ -1,0 +1,70 @@
+@startuml
+title UC07 - Đăng nhập (được include bởi UC06)
+autonumber
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
+
+actor    "Người dùng\n(Khách hàng / Barista)"      as ND
+boundary "DangNhap.tsx\n(Form đăng nhập)"          as DN
+boundary "page.tsx\n(xuLyDangNhapDangKy)"          as PG
+boundary "api.ts"                                  as API
+control  "AuthController"                          as AC
+control  "AuthService"                             as AS
+control  "JwtService"                              as JS
+database "PostgreSQL\n(bảng users)"                as DB
+
+== Bước 1: Mở màn hình đăng nhập ==
+ND -> DN ++ : Mở màn hình Đăng nhập\n(từ menu, hoặc bị chuyển sang khi đặt hàng - UC06)
+DN --> ND : Hiển thị form (Email, Mật khẩu)
+
+== Bước 2: Nhập thông tin ==
+ND -> DN : Nhập Email, Mật khẩu và nhấn "Đăng nhập"
+DN -> PG ++ : onAuthSubmit(event)
+PG -> PG : Kiểm tra không bỏ trống,\nđúng định dạng email, mật khẩu >= 6 ký tự
+
+alt Dữ liệu không hợp lệ
+    PG --> DN : setAuthError(...)
+    DN --> ND : Hiển thị thông báo lỗi nhập liệu
+else Dữ liệu hợp lệ
+    PG -> PG : setAuthLoading(true)
+    PG -> API ++ : login(email, password)
+    API -> AC ++ : POST /auth/login {email, password}
+
+    == Bước 3: Xác thực thông tin & kiểm tra phân quyền ==
+    AC -> AC : ValidationPipe kiểm tra LoginDto
+    AC -> AS ++ : login(email, password)
+    AS -> DB ++ : user.findUnique(email.trim().toLowerCase())
+    DB --> AS -- : user / null
+    alt Không tìm thấy tài khoản
+        AS --> AC : UnauthorizedException
+    else Tìm thấy tài khoản
+        AS -> AS : bcrypt.compare(password, user.passwordHash)
+        alt Sai mật khẩu
+            AS --> AC : UnauthorizedException
+        else Đúng mật khẩu
+            AS -> JS ++ : sign({sub: id, email, role}) hạn 1 ngày
+            JS --> AS -- : token
+            AS --> AC : {token, user{id, email, fullName, role, loyaltyPoints, ...}}
+        end
+    end
+    deactivate AS
+    AC --> API -- : 200 OK {token, user} / 401 "Email hoặc mật khẩu không đúng"
+    API --> PG -- : {token, user} / lỗi
+
+    alt Đăng nhập thất bại
+        PG --> DN : setAuthError(message)
+        DN --> ND : "Thông tin đăng nhập không chính xác"
+    else Đăng nhập thành công
+        == Bước 4: Cấp phiên làm việc & điều hướng ==
+        PG -> PG : setStoredToken(token), setStoredUser(user)
+        alt role = CUSTOMER
+            PG --> ND : Chuyển về Trang chủ/Menu\n(hoặc quay lại luồng Tạo đơn hàng - UC06)
+        else role = STAFF / ADMIN (Barista)
+            PG --> ND : Chuyển vào màn hình Quản lý pha chế
+        end
+    end
+    PG -> PG : setAuthLoading(false)
+end
+deactivate PG
+deactivate DN
+@enduml

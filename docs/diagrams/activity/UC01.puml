@@ -1,0 +1,48 @@
+@startuml
+title Sequence Diagram - UC-01: Đăng ký
+autonumber
+
+actor    "Người dùng\n(Khách hàng)"              as U
+boundary "Giao diện Đăng ký\n(Next.js Frontend)" as UI
+control  "AuthController\n(auth.controller.ts)"  as AC
+control  "AuthService\n(auth.service.ts)"        as AS
+entity   "PrismaService\n(prisma.service.ts)"    as PS
+database "Database\n(PostgreSQL)"                as DB
+
+U  -> UI : Nhập thông tin (họ tên, email, mật khẩu) & nhấn "Đăng ký"
+activate UI
+UI -> AC : POST /auth/register (registerDto)
+activate AC
+AC -> AS : register(registerDto)
+activate AS
+AS -> PS : user.findUnique({ where: { email } })
+activate PS
+PS -> DB : SELECT * FROM "User" WHERE email = $1
+activate DB
+DB --> PS : Trả về bản ghi User (hoặc null)
+deactivate DB
+PS --> AS : Kết quả kiểm tra email
+deactivate PS
+
+alt Email đã tồn tại
+    AS --> AC : Throw ConflictException
+    AC --> UI : 409 Conflict (Email đã được sử dụng)
+    UI --> U  : Hiển thị thông báo lỗi
+else Email chưa tồn tại
+    AS -> AS : Mã hóa mật khẩu (hash password)
+    AS -> PS : user.create({ data: { ... } })
+    activate PS
+    PS -> DB : INSERT INTO "User" (...) VALUES (...)
+    activate DB
+    DB --> PS : Trả về bản ghi User vừa tạo
+    deactivate DB
+    PS --> AS : Dữ liệu User mới
+    deactivate PS
+    AS --> AC : Trả về thông tin tài khoản (loại bỏ password)
+    deactivate AS
+    AC --> UI : 201 Created
+    deactivate AC
+    UI --> U  : Thông báo đăng ký thành công & chuyển hướng đăng nhập
+    deactivate UI
+end
+@enduml

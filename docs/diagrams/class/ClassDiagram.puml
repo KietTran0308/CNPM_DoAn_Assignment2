@@ -1,0 +1,299 @@
+@startuml
+left to right direction
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+skinparam defaultFontName Noto Sans
+skinparam classFontName Noto Sans
+skinparam classFontSize 12
+skinparam classAttributeFontSize 10
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #405067
+  ArrowColor #67768C
+  FontColor #233145
+  StereotypeFontColor #63738A
+}
+
+skinparam enum {
+  BackgroundColor #F4F7FC
+  BorderColor #8395AA
+  FontColor #233145
+}
+hide empty methods
+
+class "Người dùng (User)" as users <<users>> {
+  + id: UUID
+  + email: String
+  + password_hash: String
+  + full_name: String
+  + phone: String
+  + role: String
+  + loyalty_points: Integer
+  + reserved_points: Integer
+  + loyalty_debt: Integer
+  + created_at: DateTime
+  + avatar_url: String
+  + favorite_branch: String
+}
+
+class "Sản phẩm (Product)" as products <<products>> {
+  + id: UUID
+  + code: String
+  + name: String
+  + category: String
+  + description: String
+  + image_url: String
+  + image_key: String
+  + version: Integer
+  + is_active: Boolean
+}
+
+class "Giá theo kích cỡ (ProductSizePrice)" as product_size_prices <<product_size_prices>> {
+  + product_id: UUID
+  + size: ProductSize
+  + price: Decimal
+}
+
+class "Topping (Topping)" as toppings <<toppings>> {
+  + id: UUID
+  + code: String
+  + name: String
+  + price: Decimal
+  + is_active: Boolean
+}
+
+class "Khuyến mãi (Promotion)" as coupons <<coupons>> {
+  + id: UUID
+  + code: String
+  + discount_type: DiscountType
+  + discount_value: Decimal
+  + min_order_value: Decimal
+  + max_uses: Integer
+  + used_count: Integer
+  + reserved_count: Integer
+  + is_active: Boolean
+  + valid_from: DateTime
+  + valid_to: DateTime
+}
+
+class "Đơn hàng (Order)" as orders <<orders>> {
+  + id: UUID
+  + order_code: Integer
+  + user_id: UUID
+  + coupon_id: UUID
+  + status: OrderStatus
+  + reservation_status: String
+  + subtotal: Decimal
+  + discount_amount: Decimal
+  + points_used: Integer
+  + points_discount_amount: Decimal
+  + total: Decimal
+  + expires_at: DateTime
+  + created_at: DateTime
+  + updated_at: DateTime
+  + idempotency_key: String
+  + request_hash: String
+}
+
+class "Chi tiết đơn hàng (OrderItem)" as order_items <<order_items>> {
+  + id: UUID
+  + order_id: UUID
+  + product_id: UUID
+  + size: ProductSize
+  + quantity: Integer
+  + base_price: Decimal
+  + unit_price: Decimal
+  + line_total: Decimal
+  + sugar: String
+  + ice: String
+  + note: String
+}
+
+class "Topping của món (OrderItemTopping)" as order_item_toppings <<order_item_toppings>> {
+  + id: UUID
+  + order_item_id: UUID
+  + topping_id: UUID
+  + unit_price: Decimal
+  + servings: Integer
+}
+
+class "Thanh toán (Payment)" as payments <<payments>> {
+  + id: UUID
+  + order_id: UUID
+  + idempotency_key: String
+  + amount: Decimal
+  + method_code: String
+  + status: PaymentStatus
+  + paid_at: DateTime
+  + refunded_amount: Decimal
+  + refunded_at: DateTime
+  + created_at: DateTime
+}
+
+class "Phương thức thanh toán (PaymentMethod)" as payment_methods <<payment_methods>> {
+  + code: String
+  + name: String
+  + type: String
+  + is_active: Boolean
+  + created_at: DateTime
+}
+
+class "Giao dịch cổng thanh toán (PaymentGatewayTransaction)" as payment_gateway_transactions <<payment_gateway_transactions>> {
+  + payment_id: UUID
+  + gateway_order_id: String
+  + gateway_transaction_id: String
+  + provider_ref: String
+  + checkout_url: String
+  + qr_content: String
+  + response_code: String
+  + created_at: DateTime
+  + updated_at: DateTime
+}
+
+class "Giao dịch điểm thưởng (LoyaltyTransaction)" as loyalty_transactions <<loyalty_transactions>> {
+  + id: UUID
+  + user_id: UUID
+  + order_id: UUID
+  + points: Integer
+  + transaction_type: LoyaltyType
+  + reverses_transaction_id: UUID
+  + created_at: DateTime
+}
+
+class "Voucher của người dùng (UserVoucher)" as user_vouchers <<user_vouchers>> {
+  + id: UUID
+  + user_id: UUID
+  + coupon_id: UUID
+  + reward_id: String
+  + request_id: UUID
+  + created_at: DateTime
+  + used_at: DateTime
+  + used_order_id: UUID
+  + reserved_order_id: UUID
+}
+
+class "Lịch sử trạng thái đơn (OrderStatusHistory)" as order_status_history <<order_status_history>> {
+  + id: UUID
+  + order_id: UUID
+  + from_status: OrderStatus
+  + to_status: OrderStatus
+  + changed_at: DateTime
+  + changed_by: UUID
+}
+
+class "Nguyên liệu (Ingredient)" as ingredients <<ingredients>> {
+  + id: UUID
+  + code: String
+  + name: String
+  + unit: String
+  + stock_quantity: Decimal
+  + reserved_quantity: Decimal
+  + min_stock_quantity: Decimal
+  + version: Integer
+  + is_active: Boolean
+  + updated_at: DateTime
+}
+
+class "Công thức sản phẩm (ProductIngredient)" as product_ingredients <<product_ingredients>> {
+  + product_id: UUID
+  + size: ProductSize
+  + ingredient_id: UUID
+  + quantity: Decimal
+}
+
+class "Công thức topping (ToppingIngredient)" as topping_ingredients <<topping_ingredients>> {
+  + topping_id: UUID
+  + ingredient_id: UUID
+  + quantity: Decimal
+}
+
+class "Biến động nguyên liệu (IngredientMovement)" as ingredient_movements <<ingredient_movements>> {
+  + id: UUID
+  + ingredient_id: UUID
+  + order_id: UUID
+  + performed_by: UUID
+  + movement_type: String
+  + expected_version: Integer
+  + quantity_change: Decimal
+  + stock_before: Decimal
+  + stock_after: Decimal
+  + note: String
+  + created_at: DateTime
+}
+
+class "Nguyên liệu giữ cho đơn (OrderIngredientReservation)" as order_ingredient_reservations <<order_ingredient_reservations>> {
+  + order_id: UUID
+  + ingredient_id: UUID
+  + quantity: Decimal
+}
+
+enum "Loại khuyến mãi (DiscountType)" as DiscountType {
+  PERCENT
+  FIXED
+}
+
+enum "Loại giao dịch điểm (LoyaltyType)" as LoyaltyType {
+  EARN
+  REDEEM
+  REVERSAL
+}
+
+enum "Trạng thái đơn (OrderStatus)" as OrderStatus {
+  PENDING
+  PAID
+  PAYMENT_FAILED
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+enum "Trạng thái thanh toán (PaymentStatus)" as PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum "Kích cỡ sản phẩm (ProductSize)" as ProductSize {
+  S
+  M
+  L
+}
+
+users "1" -- "0..*" orders : đặt đơn
+users "1" -- "0..*" loyalty_transactions : tích điểm
+users "1" -- "0..*" user_vouchers : sở hữu voucher
+users "0..1" -- "0..*" order_status_history : cập nhật
+users "0..1" -- "0..*" ingredient_movements : thực hiện
+products "1" -- "0..*" product_size_prices : có bảng giá
+products "1" -- "0..*" order_items : được đặt
+toppings "1" -- "0..*" order_item_toppings : được chọn
+toppings "1" -- "0..*" topping_ingredients : có công thức
+product_size_prices "1" -- "0..*" order_items : kích cỡ hợp lệ
+product_size_prices "1" -- "0..*" product_ingredients : định lượng
+orders "1" -- "0..*" order_items : gồm món
+orders "1" -- "0..*" payments : có lần thanh toán
+orders "0..1" -- "0..*" loyalty_transactions : phát sinh điểm
+orders "1" -- "0..*" order_status_history : có lịch sử
+orders "0..1" -- "0..*" ingredient_movements : trừ tồn kho
+orders "1" -- "0..*" order_ingredient_reservations : giữ nguyên liệu
+orders "0..1" -- "0..1" user_vouchers : đã sử dụng
+orders "0..1" -- "0..*" user_vouchers : đang giữ
+coupons "0..1" -- "0..*" orders : được áp dụng
+coupons "1" -- "0..*" user_vouchers : được đổi
+order_items "1" -- "0..*" order_item_toppings : kèm topping
+payment_methods "1" -- "0..*" payments : sử dụng
+payments "1" -- "0..1" payment_gateway_transactions : chi tiết cổng
+ingredients "1" -- "0..*" product_ingredients : tham gia công thức
+ingredients "1" -- "0..*" topping_ingredients : tham gia công thức
+ingredients "1" -- "0..*" ingredient_movements : có biến động
+ingredients "1" -- "0..*" order_ingredient_reservations : được giữ
+loyalty_transactions "0..1" -- "0..1" loyalty_transactions : hoàn tác điểm (reverses_transaction_id)
+orders ..> OrderStatus : enum
+payments ..> PaymentStatus : enum
+product_size_prices ..> ProductSize : enum
+coupons ..> DiscountType : enum
+loyalty_transactions ..> LoyaltyType : enum
+@enduml

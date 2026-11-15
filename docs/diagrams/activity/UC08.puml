@@ -1,0 +1,81 @@
+@startuml
+title UC08 - Áp mã khuyến mãi («extend» UC06 - Tạo đơn hàng)
+autonumber
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
+
+actor    "Khách hàng"                                          as KH
+boundary "ThanhToan.tsx / GioHang.tsx\n(Ô nhập mã ưu đãi)"     as UI
+boundary "page.tsx\n(xuLyApMaGiamGia)"                         as PG
+boundary "api.ts"                                              as API
+control  "VouchersController"                                  as VC
+control  "useGioHang\n(Zustand store)"                         as ST
+database "PostgreSQL\n(coupons, user_vouchers)"                as DB
+
+== Bước 1-2: Chọn mục Mã khuyến mãi / Voucher ==
+KH -> UI ++ : Chọn mục "Mã khuyến mãi / Voucher"\n(tại màn hình Tạo đơn hàng - UC06)
+opt Hiển thị danh sách voucher khả dụng
+    UI -> API ++ : getCoupons()
+    API -> VC ++ : GET /vouchers
+    VC -> DB ++ : coupon.findMany(isActive, validFrom <= now,\nvalidTo > now, chưa cấp cho user nào)
+    DB --> VC -- : danh sách coupon
+    VC -> VC : Lọc usedCount < maxUses
+    VC --> API -- : danh sách voucher khả dụng
+    API --> UI -- : danh sách voucher
+end
+UI --> KH : Hiển thị ô nhập mã (và danh sách voucher nếu có)
+
+== Bước 3: Nhập / chọn mã ==
+KH -> UI : Nhập hoặc chọn mã, nhấn "Áp dụng"
+UI -> PG ++ : onApplyPromo(event)
+PG -> PG : setPromoError(null)\ncode = promoCodeInput.trim().toUpperCase()
+
+== Bước 4: Kiểm tra điều kiện áp dụng ==
+alt Mã rỗng
+    PG --> UI : Không xử lý
+else Mã BREW10
+    PG -> PG : discount = round(rawSubtotal x 10%)
+    PG -> ST ++ : applyPromo({code, discount})
+    ST -> ST : appliedPromo = promo, promoError = null
+    ST --> PG -- : đã áp mã
+else Mã GIAM10K
+    alt rawSubtotal >= 30.000đ
+        PG -> ST ++ : applyPromo({code: GIAM10K, discount: 10.000})
+        ST -> ST : appliedPromo = promo, promoError = null
+        ST --> PG -- : đã áp mã
+    else Chưa đủ giá trị tối thiểu
+        PG -> ST ++ : setPromoError("Mã giảm giá không hợp lệ")
+        ST --> PG -- : ok
+    end
+else Mã không tồn tại / hết hạn / hết lượt
+    PG -> ST ++ : setPromoError("Mã giảm giá không hợp lệ")
+    ST --> PG -- : ok
+end
+
+== Bước 5: Cập nhật số tiền giảm và tổng thanh toán ==
+PG --> UI -- : appliedPromo / promoError
+alt Áp mã thành công
+    UI -> ST ++ : getDiscountAmount(), getTotalCartPrice()
+    ST --> UI -- : discount = min(subtotal, discount),\ntổng = subtotal - discount
+    UI --> KH : Hiển thị dòng "Ưu đãi (mã)" -mức giảm\nvà tổng thanh toán mới
+else Áp mã thất bại
+    UI --> KH : Báo lỗi cụ thể, giữ nguyên tổng tiền
+end
+
+== Luồng thay thế: gỡ mã hoặc đổi mã khác ==
+opt Khách hàng gỡ bỏ mã đã chọn
+    KH -> UI : Nhấn "Bỏ mã"
+    UI -> ST ++ : removePromo()
+    ST --> UI -- : appliedPromo = null, tổng tiền khôi phục
+    UI --> KH : Hiển thị lại tổng chưa giảm,\ncho phép nhập mã khác (lặp lại bước 3)
+end
+deactivate UI
+
+opt Giỏ hàng thay đổi làm mã GIAM10K không còn đủ điều kiện
+    PG -> ST ++ : applyPromo(null) + setPromoError("Mã giảm giá không hợp lệ")
+    ST --> PG -- : ok
+end
+
+== Xác thực chính thức tại backend (thuộc UC06) ==
+ref over PG, DB : Khi tạo đơn, OrdersService.create() kiểm tra lại couponCode\n(tồn tại, isActive, hạn, usedCount < maxUses, minOrderValue, voucher cá nhân)\nvà PaymentsService tăng usedCount khi thanh toán thành công
+@enduml

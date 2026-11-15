@@ -1,28 +1,44 @@
-# CD scaffold: Build/push images on release tags; Render hooks optional.
-# Requires CI pass and branch protection configured manually in GitHub.
-name: CD - Docker release images
+name: CD - BrewLite Release (GHCR + Render)
 
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: brewlite-production-release
+  cancel-in-progress: false
 
 jobs:
   quality:
+    name: Quality gate
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
 
   images:
+    name: Build and publish immutable Docker images
     needs: quality
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      prefix: ${{ steps.names.outputs.prefix }}
     steps:
       - uses: actions/checkout@v4
-      - name: Generate lowercase GHCR repository name
+      - name: Require version tag
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "::error::Run CD from a release tag, e.g. v1.0.0"
+            exit 1
+          fi
+      - name: Generate lowercase GHCR image names
         id: names
         shell: bash
         run: echo "prefix=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
@@ -32,19 +48,24 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build + push API image
+      - name: Check public API URL for the frontend bundle
+        env:
+          PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+        shell: bash
+        run: |
+          case "$PUBLIC_API_URL" in
+            https://*) ;;
+            *) echo "::error::Set Actions variable NEXT_PUBLIC_API_URL to the API HTTPS origin"; exit 1 ;;
+          esac
+      - name: Build and push API
         uses: docker/build-push-action@v6
         with:
           context: ./apps/api
           push: true
-          tags: ${{ steps.names.outputs.prefix }}-api:${{ github.sha }}
-      # Set repo variable NEXT_PUBLIC_API_URL to public HTTPS API before releasing.
-      - name: Require public API URL for web image
-        env:
-          PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
-        run: |
-          case "$PUBLIC_API_URL" in https://*) ;; *) echo 'Configure repository variable NEXT_PUBLIC_API_URL as public HTTPS URL'; exit 1 ;; esac
-      - name: Build + push Web image
+          tags: |
+            ${{ steps.names.outputs.prefix }}-api:${{ github.sha }}
+            ${{ steps.names.outputs.prefix }}-api:${{ github.ref_name }}
+      - name: Build and push Web
         uses: docker/build-push-action@v6
         with:
           context: ./apps/web
@@ -52,9 +73,48 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
             NEXT_PUBLIC_ENABLE_DEMO_PAYMENTS=false
-          tags: ${{ steps.names.outputs.prefix }}-web:${{ github.sha }}
+          tags: |
+            ${{ steps.names.outputs.prefix }}-web:${{ github.sha }}
+            ${{ steps.names.outputs.prefix }}-web:${{ github.ref_name }}
 
-  # OPTIONAL: Works only if your Render services are already configured to deploy
-  # these corresponding image tags. A hook alone does NOT import GHCR images.
-  # No automatic production schema migration is configured (fresh local SQL != production migration).
-  # For now deployment and rollback are documented as manual in docs/deployment.md.
+  deploy:
+    name: Deploy API -> Web, wait for Render Live, smoke test
+    needs: images
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Production deployment with strict status checks
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_API_SERVICE_ID: ${{ vars.RENDER_API_SERVICE_ID }}
+          RENDER_WEB_SERVICE_ID: ${{ vars.RENDER_WEB_SERVICE_ID }}
+          RENDER_DEPLOY_MODE: ${{ vars.RENDER_DEPLOY_MODE }}
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          PRODUCTION_WEB_URL: ${{ vars.PRODUCTION_WEB_URL }}
+          API_IMAGE_URL: ${{ needs.images.outputs.prefix }}-api:${{ github.sha }}
+          WEB_IMAGE_URL: ${{ needs.images.outputs.prefix }}-web:${{ github.sha }}
+        run: node scripts/render-release.mjs
+
+  release:
+    name: Publish GitHub release notes
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create or update release entry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "GitHub Release already exists: $GITHUB_REF_NAME"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "BrewLite $GITHUB_REF_NAME" --generate-notes
+          fi

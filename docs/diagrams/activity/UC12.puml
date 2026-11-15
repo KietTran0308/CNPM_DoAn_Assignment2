@@ -1,0 +1,79 @@
+@startuml UC12_Xem_Lich_Su_Don
+title UC12 - Xem lịch sử đơn
+autonumber
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
+
+actor    "Khách hàng"                    as KH
+boundary "ThanhDieuHuong\n(Menu Tài khoản)" as TD
+boundary "page.tsx\n(taiLichSuDon)"      as PG
+boundary "api.ts\n(getMyOrders)"         as API
+control  "JwtAuthGuard"                  as JG
+control  "OrdersController"              as OC
+control  "OrdersService"                 as OS
+database "PostgreSQL\n(Prisma)"          as DB
+boundary "LichSuDon.tsx"                 as LS
+
+note over KH : Tiền điều kiện: Khách hàng đã đăng nhập (có token)
+
+== Bước 1: Chọn mục Lịch sử đơn hàng ==
+KH -> TD ++ : Nhấn "Tài khoản" -> "Lịch sử đơn hàng"
+TD -> PG ++ : onNavigateHistory()
+PG -> PG : setHistoryLoading(true)
+PG -> LS ++ : setManHinhHienTai('history')
+LS --> KH : Hiển thị "Đang tải danh sách đơn hàng..."
+
+== Bước 2: Truy xuất danh sách đơn hàng ==
+PG -> API ++ : fetchQuery(getMyOrders)
+API -> JG ++ : GET /orders/me\nAuthorization: Bearer JWT
+alt Token thiếu / không hợp lệ / hết hạn
+    JG --> API : 401 Unauthorized
+    API --> PG : Lỗi xác thực
+else Token hợp lệ
+    JG -> OC ++ : request.user = {id, email, role}
+    OC -> OS ++ : mine(userId)
+    OS -> DB ++ : order.findMany(where userId, orderBy createdAt desc,\ninclude user, coupon, payments, statusHistory,\norderItems{product, toppings{topping}})
+    DB --> OS -- : danh sách đơn hàng
+    OS --> OC -- : danh sách đơn
+    OC --> API -- : 200 OK
+    API -> API : mapOrder() từng đơn
+    API --> PG : Order[]
+end
+deactivate JG
+deactivate API
+
+== Bước 2 (tiếp): Hiển thị danh sách ==
+PG -> PG : setOrderHistory(data), setHistoryLoading(false)
+PG -> LS : orderHistory, products
+alt Khách hàng chưa có đơn hàng nào
+    LS --> KH : "Bạn chưa có đơn hàng nào"
+else Có đơn hàng
+    LS --> KH : Danh sách theo thứ tự mới nhất:\nMã đơn, Ngày đặt, Tổng tiền, Trạng thái\n(Chờ xử lý / Đã thanh toán / Đang pha chế /\nSẵn sàng / Hoàn tất / Lỗi / Đã hủy)
+end
+PG --> TD : Hoàn tất tải dữ liệu
+deactivate PG
+deactivate TD
+
+== Bước 3: Xem chi tiết một đơn hàng ==
+opt Khách hàng xem chi tiết đơn
+    KH -> LS : Chọn / xem một đơn cụ thể
+    LS -> LS : Lấy order.items, tra tên món theo products
+    LS --> KH : Chi tiết các món (tên, Size, số lượng,\nđường/đá, ghi chú), thành tiền từng dòng,\ntổng thanh toán, thanh tiến trình đơn
+end
+
+== Luồng thay thế: Đặt lại (Reorder) ==
+opt Khách hàng nhấn "Đặt lại"
+    KH -> LS : Nhấn "Đặt lại" trên đơn cũ
+    LS -> PG ++ : onReorder(orderId)
+    PG -> PG : addToCart() cho từng món của đơn cũ
+    PG --> KH -- : Món được thêm nhanh vào giỏ hàng
+end
+
+== Quay lại ==
+opt Khách hàng nhấn "Về thực đơn chính"
+    KH -> LS : Nhấn "Về thực đơn chính"
+    LS -> PG ++ : onBackToMenu()
+    PG --> KH -- : Chuyển về màn hình Menu
+end
+deactivate LS
+@enduml
