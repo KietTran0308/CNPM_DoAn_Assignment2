@@ -1,0 +1,95 @@
+@startuml
+title Đặt và thanh toán đơn hàng bằng mã QR
+autonumber
+skinparam shadowing false
+skinparam defaultFontName Tt=imes new roman
+skinparam defaultFontSize 16
+skinparam maxMessageSize 400
+skinparam sequenceGroupBorderThickness 1
+
+actor    "Khách hàng\n(Customer)"                              as C
+boundary "Next.js UI"                                          as UI
+control  "NestJS API\n(Guard · Controller · Service · Prisma)" as API
+database "Database\n(PostgreSQL)"                              as DB
+participant "Payment Service\n(mô phỏng)"                      as PAY
+
+== A. Tạo đơn hàng ==
+C -> UI : Chọn phương thức, áp mã / dùng điểm, nhấn "Xác nhận thanh toán"
+activate UI
+UI -> API : POST /orders {items, couponCode, pointsToUse}\n[Bearer JWT, Idempotency-Key]
+activate API
+API -> API : Xác thực JWT (UC07) & validate DTO
+break JWT / dữ liệu không hợp lệ
+    API --> UI : 401 Unauthorized / 400 Bad Request
+    UI --> C : Thông báo lỗi / chuyển sang Đăng nhập
+end
+API -> DB : Tìm đơn theo Idempotency-Key
+activate DB
+DB --> API : Đã có / chưa có
+deactivate DB
+break Key đã dùng (client gửi lại)
+    API --> UI : Trả lại đơn đã lưu (cùng yêu cầu) hoặc 409 (khác yêu cầu)
+end
+group Transaction (Serializable)
+    API -> DB : Tính lại giá size/topping từ DB; kiểm tra coupon/voucher, điểm thưởng (sai → 400, rollback)
+    activate DB
+    API -> DB : INSERT orders (PENDING, hạn 20 phút) + order_items + status_history
+    DB --> API : COMMIT
+    deactivate DB
+end
+API --> UI : 201 {orderId, orderCode, status = PENDING, total}
+deactivate API
+
+== B. Thanh toán không tiền mặt ==
+UI -> API : POST /payments {orderId, method}\n[Bearer JWT, Idempotency-Key – giữ nguyên khi gửi lại]
+activate API
+API -> API : Xác thực JWT & validate DTO
+API -> DB : Tìm giao dịch theo Idempotency-Key
+activate DB
+DB --> API : Đã có / chưa có
+deactivate DB
+break Key đã dùng (timeout, bấm lại, gửi lại)
+    API --> UI : 201 Trả giao dịch đã lưu (replay) – không trừ kho / điểm lần 2 (khác yêu cầu → 409)
+    UI --> C : Hiển thị kết quả đã có
+end
+API -> DB : Đọc đơn: kiểm tra chủ đơn, hạn thanh toán, trạng thái
+activate DB
+DB --> API : Đơn PENDING / PAYMENT_FAILED
+deactivate DB
+break Đơn hết hạn / đã hủy / đã thanh toán
+    API --> UI : 400 / 409
+    UI --> C : Thông báo lỗi
+end
+API -> PAY : Tạo giao dịch & mã QR (orderId, amount, hạn = hạn đơn)
+PAY --> API : Kết quả thanh toán (callback: SUCCESS / FAILED)
+
+alt SUCCESS
+    group Transaction (Serializable)
+        API -> DB : Kiểm tra & trừ kho nguyên liệu (Optimistic Locking: version) + ghi ingredient_movements
+        break Không đủ nguyên liệu / xung đột version
+            DB --> API : ROLLBACK
+            API --> UI : 409 Conflict
+            UI --> C : Thông báo hết nguyên liệu, quay lại giỏ hàng
+        end
+        API -> DB : UPDATE orders = PAID + status_history; tiêu coupon/voucher; trừ điểm đã dùng
+        activate DB
+        API -> DB : INSERT payments (SUCCESS); cộng điểm thưởng (UC11)
+        DB --> API : COMMIT
+        deactivate DB
+    end
+    note over API, DB : Đơn PAID vào hàng chờ của Barista
+    API --> UI : 201 {order = PAID, payment, earnedPoints}
+    UI --> C : Hiển thị xác nhận đơn: mã đơn, điểm thưởng
+else FAILED
+    group Transaction (Serializable)
+        API -> DB : UPDATE orders = PAYMENT_FAILED + status_history; INSERT payments (FAILED)
+        activate DB
+        DB --> API : COMMIT
+        deactivate DB
+    end
+    API --> UI : 201 {order = PAYMENT_FAILED}
+    UI --> C : Thông báo thất bại, cho phép "Thử lại" (lặp lại phần B) hoặc "Hủy đơn"
+end
+deactivate API
+deactivate UI
+@enduml
