@@ -1,0 +1,53 @@
+@startuml
+' Deployment Diagram - BrewLite Assignment 2
+' Phiên bản mô tả triển khai Render qua Git, không khẳng định Render lấy image từ GHCR.
+left to right direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+
+node "Thiết bị khách hàng" as client {
+  artifact "Trình duyệt / Next.js UI" as browser
+}
+
+node "GitHub" as github {
+  artifact "Repository\nCNPM_DoAn_Assignment2" as repo
+  component "GitHub Actions CI/CD" as actions
+}
+
+cloud "GHCR (registry)" as ghcr {
+  artifact "Image Web/API theo SHA hoặc tag" as images
+}
+
+cloud "Render - Production" as render {
+  node "Web Service Frontend" as web {
+    component "Next.js" as next
+  }
+  node "Web Service Backend" as api {
+    component "NestJS / Prisma" as nest
+  }
+  database "PostgreSQL" as postgres
+}
+
+cloud "ZaloPay Sandbox" as zalopay
+
+browser --> next : HTTPS 443
+next --> nest : REST HTTPS 443
+nest --> postgres : DATABASE_URL / PostgreSQL
+nest --> zalopay : HTTPS tạo giao dịch/QueryDR
+zalopay --> nest : HTTPS callback
+repo --> actions : Push / Tag / PR
+actions --> ghcr : Build / Push image
+actions --> web : Render API / Git deploy
+(Ví dụ CD 15-11-2026)
+actions --> api : Render API / Git deploy
+(Sau đó smoke /health, /products)
+
+note bottom of actions
+CI sử dụng PostgreSQL 16 test riêng.
+Local chạy Compose: db + api + web.
+Môi trường production lưu secrets tại Render/GitHub.
+Rollback hiện là thủ công.
+end note
+
+@enduml

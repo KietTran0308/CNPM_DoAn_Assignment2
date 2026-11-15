@@ -5,6 +5,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'BrewLite',
   description: 'Đặt cà phê và trà trực tuyến tại BrewLite',
+  manifest: '/manifest.json',
   icons: {
     icon: LOGO.favicon,
     shortcut: LOGO.favicon,

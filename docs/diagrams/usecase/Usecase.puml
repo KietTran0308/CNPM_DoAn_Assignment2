@@ -1,0 +1,38 @@
+@startuml
+left to right direction
+skinparam packageStyle rectangle
+actor "Khách hàng" as Customer
+actor "Nhân viên quầy" as Staff
+actor "Cổng thanh toán" as Gateway
+rectangle "HỆ THỐNG BREWLITE" {
+  usecase "Đăng ký" as Register
+  usecase "Đăng nhập" as Login
+  usecase "Xem menu" as Menu
+  usecase "Xem chi tiết sản phẩm" as Detail
+  usecase "Chọn size/topping" as Options
+  usecase "Quản lý giỏ hàng" as Cart
+  usecase "Tạo đơn hàng" as Order
+  usecase "Áp mã khuyến mãi" as Coupon
+  usecase "Thanh toán không tiền mặt" as Payment
+  usecase "Xem xác nhận đơn" as Confirm
+  usecase "Xem lịch sử đơn" as History
+  usecase "Tiếp nhận đơn" as Receive
+  usecase "Cập nhật trạng thái pha chế" as Prepare
+}
+Customer -- Register
+Customer -- Login
+Customer -- Menu
+Customer -- Detail
+Customer -- Cart
+Customer -- Order
+Customer -- History
+Staff -- Login
+Staff -- Receive
+Staff -- Prepare
+Gateway -- Payment
+Options ..> Detail : <<extend>>
+Order ..> Login : <<include>>
+Coupon ..> Order : <<extend>>
+Order ..> Payment : <<include>>
+Payment ..> Confirm : <<include>>
+@enduml

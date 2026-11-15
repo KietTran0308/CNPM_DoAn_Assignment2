@@ -1,71 +1,351 @@
-# CNPM – BrewLite Assignment 2
+# \# BrewLite - Assignment 2
 
-Monorepo: Next.js trong `apps/web`, NestJS trong `apps/api`; PostgreSQL 16 chạy độc lập trên Docker local. Source nghiệp vụ được giữ nguyên.
+# 
 
-## Docker local (không trùng BrewLite gốc)
+# BrewLite là ứng dụng đặt đồ uống, tạo đơn, thanh toán và theo dõi đơn hàng.
 
-Tại thư mục gốc có `docker-compose.yml`:
+# Dự án dùng Next.js (frontend), NestJS (backend), PostgreSQL 16, Prisma ORM và Docker.
 
-```powershell
-Copy-Item .env.example .env
-# Sửa POSTGRES_PASSWORD / JWT_SECRET / ZALOPAY_APP_ID, KEY1, KEY2 trong .env
+# 
 
-docker compose config --quiet
-docker compose up -d --build
-docker compose ps
-docker compose logs --tail=100 db
-docker compose logs --tail=100 api
-```
+# \## 1. Cấu trúc dự án
 
-- Website Assignment 2: <http://localhost:3200>
-- API health Assignment 2: <http://localhost:4200/health>
-- API products Assignment 2: <http://localhost:4200/products>
-- PostgreSQL Assignment 2: host `127.0.0.1`, port `5434`, database theo `POSTGRES_DB` (mặc định `brewlite`).
-- Frontend/backend bên trong container vẫn lắng nghe cổng 3000/4000, PostgreSQL vẫn 5432; chỉ host port khác.
+# 
 
-Container DB dùng volume **`brewlite_assignment2_pg16_fresh`** (giữ nguyên tên từ file đã nhận), hoàn toàn khác volume BrewLite 1. File `apps/api/prisma/dbBrewLite.sql` chỉ được tự import một lần trên volume hoàn toàn trống. Nếu volume Assignment 2 đã có dữ liệu, không tự chạy lại SQL. **Không dùng `docker compose down -v` nếu muốn giữ DB.**
+# \- `apps/web`: giao diện Next.js.
 
-Nếu muốn chạy lại riêng Frontend/Backend sau khi sửa code:
+# \- `apps/api`: NestJS API và Prisma.
 
-```powershell
-docker compose up -d --build web
-docker compose up -d --build api
-```
+# \- `apps/api/prisma/dbBrewLite.sql`: tạo cấu trúc và dữ liệu mẫu khi PostgreSQL Docker có volume trống.
 
-Nếu thấy cổng vẫn dùng bản cũ, kiểm tra `docker compose config`, `.env`, biến môi trường và khởi động lại container với `docker compose up -d --force-recreate web api`.
+# \- `apps/api/prisma/migrations`: lịch sử Prisma Migrate.
 
-## ZaloPay Sandbox trong Docker local
+# \- `docs/requirements`: bối cảnh, SRS và use-case.
 
-- `ZALOPAY_LOCAL_MODE=true` (container API); callback URL local mặc định để trống.
-- Backend tự đối soát QueryDR; **không** trỏ callback của Docker local sang Render vì database local khác.
-- Nếu cần callback có HTTPS tunnel, đặt `ZALOPAY_LOCAL_CALLBACK_URL=https://<tunnel-domain>/payments/zalopay/callback`, trỏ về chính API local `localhost:4200`.
-- `NEXT_PUBLIC_API_URL=http://localhost:4200` được đưa vào Next.js tại thời điểm Docker build; đổi biến này phải build lại `web`.
-- Không đưa khóa ZaloPay, JWT secret, DB password lên Git.
+# \- `docs/diagrams`: các sơ đồ UML và ảnh.
 
-## Render (không dùng Compose local để cấu hình Render)
+# \- `docs/architecture`: mô tả kiến trúc và các ADR.
 
-Trên Render, Root Directory cho hai Web Services: `apps/web` và `apps/api`. Node service phía API sử dụng `PORT` do Render cấp; frontend cần `NEXT_PUBLIC_API_URL` là HTTPS của API Assignment 2 ở thời điểm build. Route nhận callback có thật trong code là `POST /payments/zalopay/callback`.
+# \- `docs/traceability-matrix.md`: ma trận truy vết yêu cầu.
 
-Nếu cả BrewLite 1 và Assignment 2 **dùng cùng một database PostgreSQL**, dữ liệu đơn/giao dịch và scheduler đối soát cùng tồn tại. Cần tránh deploy migration xung đột và kiểm thử race-condition; không tạo lại schema SQL trên DB có dữ liệu. Việc đổi cổng Docker local không thay đổi kết nối database trên Render.
+# \- `docs/deployment.md`: môi trường và quy trình triển khai.
 
-## Kiểm tra mã và chạy test
+# \- `.github/workflows`: CI và CD.
 
-```powershell
-cd apps/api
-npm ci
-npm run lint
-npm test
-npm run build
+# 
 
-cd ../web
-npm ci
-npm run lint
-npm test
-npm run build
-```
+# \## 2. Chạy bằng Docker (Windows PowerShell)
 
-Integration tests thật cần DB thử nghiệm tách biệt. Script `apps/api/scripts/e2e.mjs` là E2E HTTP Node, không phải Playwright; không chạy E2E trên Production. `package.json` và `package-lock.json` ở **cả hai ứng dụng đều phải giữ** để Docker chạy `npm ci`.
+# 
 
-## Tài liệu/Minh chứng
+# Yêu cầu: đã cài Docker Desktop, Docker Compose và Git.
 
-Xem `docs/report-completion-checklist.md`. Báo cáo PDF đang có nhiều ảnh UML nhưng chưa có file `.puml` / `.svg` tương ứng trong ZIP. Không đánh dấu CI/CD, test hay triển khai là `PASSED` khi chưa có log/URL thực tế.
+# 
+
+# Tại thư mục gốc dự án, chạy:
+
+# 
+
+# \*\*Nếu đã có `.env` và Docker chạy tốt, bỏ qua bước tạo file. \*\*Không ghi đè `.env` đang dùng\*\*. File `.env.example` chỉ chứa giá trị mẫu, không phải mật khẩu thật.\*\*
+
+# 
+
+# ```powershell
+
+# Copy-Item .env.example .env
+
+# ```
+
+# 
+
+# Mở `.env`, thay ít nhất `POSTGRES\_PASSWORD` và `JWT\_SECRET` bằng giá trị riêng đủ mạnh.
+
+# Nếu cần thanh toán ZaloPay Sandbox, nhập thêm `ZALOPAY\_APP\_ID`, `ZALOPAY\_KEY1`, `ZALOPAY\_KEY2` hợp lệ.
+
+# Không dùng khóa Production để thử nghiệm hoặc đẩy `.env` lên GitHub. Nếu PostgreSQL volume đã có dữ liệu, không tự đổi `POSTGRES\_PASSWORD` trong `.env` vì tài khoản database cũ không tự đổi mật khẩu.
+
+# 
+
+# ```powershell
+
+# docker compose config --quiet
+
+# docker compose up -d --build
+
+# docker compose ps
+
+# ```
+
+# 
+
+# Đường dẫn local:
+
+# 
+
+# \- Website: http://localhost:3200
+
+# \- API: http://localhost:4200
+
+# \- Kiểm tra API: http://localhost:4200/health
+
+# \- Menu JSON: http://localhost:4200/products
+
+# \- PostgreSQL: `127.0.0.1:5434` (nội bộ Docker là `db:5432`).
+
+# 
+
+# Nếu muốn xem log:
+
+# 
+
+# ```powershell
+
+# docker compose logs --tail=100 api
+
+# docker compose logs --tail=100 web
+
+# ```
+
+# 
+
+# Dừng container nhưng vẫn giữ dữ liệu:
+
+# 
+
+# ```powershell
+
+# docker compose down
+
+# ```
+
+# 
+
+# \*\*Không chạy `docker compose down -v`\*\* nếu muốn giữ PostgreSQL hiện có.
+
+# SQL trong `dbBrewLite.sql` chỉ tự chạy khi volume database hoàn toàn trống.
+
+# Không dùng SQL khởi tạo để ghi đè database đang có dữ liệu.
+
+# 
+
+# \## 3. Chức năng chính
+
+# 
+
+# \- Xem menu, chi tiết đồ uống, chọn kích cỡ và topping.
+
+# \- Thêm/xóa món trong giỏ hàng và tính tổng tiền.
+
+# \- Đăng ký, đăng nhập bằng JWT.
+
+# \- Tạo đơn, kiểm tra và giữ trước nguyên liệu; ngăn đơn trùng bằng Idempotency-Key.
+
+# \- Thanh toán qua ZaloPay Sandbox, hiển thị QR và đối soát callback/QueryDR.
+
+# \- Có phương thức thanh toán mô phỏng dành cho môi trường kiểm thử khi được bật.
+
+# \- Theo dõi trạng thái, lịch sử đơn hàng, hủy đơn theo điều kiện.
+
+# \- Hỗ trợ mã giảm giá và điểm thưởng; Backend có API hàng đợi và cập nhật trạng thái cho nhân viên (chưa có giao diện nhân viên riêng trong ZIP).
+
+# 
+
+# ZaloPay Sandbox không phải thanh toán tiền thật. Chỉ xem đơn là đã thanh toán sau khi Backend xác minh kết quả.
+
+# Docker local không gửi callback sang Backend Render vì hai môi trường có thể dùng database khác nhau.
+
+# 
+
+# \## 4. Kiểm thử
+
+# 
+
+# Cài Node.js 22 nếu muốn chạy lệnh npm ngoài Docker.
+
+# 
+
+# Backend:
+
+# 
+
+# ```powershell
+
+# cd apps/api
+
+# npm ci
+
+# npm run prisma:generate
+
+# npm run lint
+
+# npm test
+
+# npm run build
+
+# ```
+
+# 
+
+# Frontend (mở PowerShell tại thư mục gốc rồi chạy):
+
+# 
+
+# ```powershell
+
+# cd apps/web
+
+# npm ci
+
+# npm run lint
+
+# npm test
+
+# npm run build
+
+# ```
+
+# 
+
+# `npm test` Backend chạy Jest unit tests; những integration tests có sử dụng PostgreSQL được bỏ qua nếu không đặt `TEST\_DATABASE\_URL`.
+
+# Chỉ chạy integration/HTTP E2E trên database thử nghiệm \*\*tên `brewlite\_test`\*\*, không dùng database local đang có đơn hoặc database Production.
+
+# GitHub Actions tự khởi tạo PostgreSQL `brewlite\_test` độc lập và chạy các bài kiểm thử này.
+
+# 
+
+# Kiểm tra API đang chạy với Docker local:
+
+# 
+
+# ```powershell
+
+# curl.exe http://localhost:4200/health
+
+# curl.exe http://localhost:4200/products
+
+# ```
+
+# 
+
+# \## 5. Prisma Migrate
+
+# 
+
+# Docker local dùng SQL để khởi tạo dữ liệu ban đầu. Với database \*\*đã có dữ liệu\*\*, nhóm sử dụng baseline `0\_init` để đánh dấu cấu trúc hiện tại đã được áp dụng.
+
+# Kiểm tra lịch sử migration trong Docker:
+
+# 
+
+# ```powershell
+
+# docker compose exec api ./node\_modules/.bin/prisma migrate status
+
+# ```
+
+# 
+
+# Không dùng `prisma migrate reset` hoặc `prisma db push` trên database đang có dữ liệu thực tế.
+
+# Không tự động chạy `migrate deploy` vào Render khi database Production chưa được sao lưu, đối chiếu schema và baseline riêng.
+
+# Lưu ý: migration `0\_init` được xuất bằng `pg\_dump` còn cú pháp `\\restrict` và `\\unrestrict` của psql; cần xử lý/kiểm thử bản SQL trước khi dùng nó tái tạo database trống. Không sửa migration đã được đánh dấu áp dụng mà chưa đánh giá checksum/lịch sử.
+
+# 
+
+# Các file seed bổ sung trong `apps/api/prisma/` được dùng cho \*\*database demo/test đã có schema\*\*, không tự chạy trên Production:
+
+# 
+
+# ```powershell
+
+# cd apps/api
+
+# npm run db:seed
+
+# ```
+
+# 
+
+# `db:seed` đã bao gồm danh mục phương thức thanh toán. Bạn cũng có thể chạy `npm run db:seed:catalog` riêng nếu chỉ cần danh mục. Hai lệnh cần `DATABASE\_URL` trỏ đúng database demo/test đã có schema (có thể tạo `apps/api/.env` từ file mẫu của API nếu chạy CLI trên Windows). Không chạy chúng trên Production.
+
+# 
+
+# \## 6. CI/CD và triển khai Render
+
+# 
+
+# Repository: https://github.com/KietTran0308/CNPM\_DoAn\_Assignment2
+
+# 
+
+# \- CI: `.github/workflows/ci.yml` kiểm tra API, Web và HTTP E2E bằng PostgreSQL test.
+
+# \- CD: `.github/workflows/cd.yml` chạy quality gate, build/push Docker images lên GHCR, triển khai hai dịch vụ Render và smoke test.
+
+# \- CD phát hành bằng tag dạng `v1.0.0`, hoặc chạy thủ công với ref là release tag.
+
+# \- Render hiện có thể được cấu hình ở chế độ Git deploy (`RENDER\_DEPLOY\_MODE=git`), tức image GHCR được đẩy lên nhưng không phải nguồn triển khai của Render.
+
+# \- Migration PostgreSQL Production \*\*chưa tự động hóa\*\* trong pipeline CD.
+
+# 
+
+# Các thông số CD cấu hình trong GitHub Actions Secrets/Variables: `RENDER\_API\_KEY`, `RENDER\_API\_SERVICE\_ID`, `RENDER\_WEB\_SERVICE\_ID`, `NEXT\_PUBLIC\_API\_URL`, `PRODUCTION\_WEB\_URL`, `RENDER\_DEPLOY\_MODE`.
+
+# 
+
+# Production tham khảo:
+
+# 
+
+# \- Web: https://brewlite-a2-frontend.onrender.com
+
+# \- API: https://brewlite-a2-backend.onrender.com
+
+# \- Health: https://brewlite-a2-backend.onrender.com/health
+
+# 
+
+# Cần kiểm tra các URL đang hoạt động tại thời điểm nghiệm thu; liên kết không tự chứng minh deployment mới nhất đã thành công.
+
+# 
+
+# \## 7. Rollback khi triển khai thất bại
+
+# 
+
+# 1\. Kiểm tra job thất bại trong GitHub Actions và logs của Render.
+
+# 2\. Trên Render, triển khai lại commit/deploy ổn định gần nhất cho API và Web.
+
+# 3\. Kiểm tra `/health`, `/products`, trang chủ và nghiệp vụ đặt đơn.
+
+# 4\. Nếu lỗi liên quan database, sao lưu và đánh giá thay đổi schema riêng; rollback mã nguồn không tự đảo database.
+
+# 5\. Ghi lại nguyên nhân và phiên bản đã khôi phục.
+
+# 
+
+# \## 8. Tài liệu và minh chứng
+
+# 
+
+# \- `docs/requirements/context-and-scope.md`, `srs.md`, `use-case-checkout.md`.
+
+# \- `docs/diagrams/`: Use-case, Activity, Sequence, Class, Deployment.
+
+# \- `docs/architecture/overview.md` và `docs/architecture/adr/`.
+
+# \- `docs/deployment.md`, `docs/traceability-matrix.md`.
+
+# \- `docs/sprint-review-retrospective.md`.
+
+# \- API HTTP E2E: `apps/api/scripts/e2e.mjs`.
+
+# \- GitHub Actions: https://github.com/KietTran0308/CNPM\_DoAn\_Assignment2/actions
+
+#
+
+

@@ -1,0 +1,41 @@
+@startuml
+left to right direction
+skinparam packageStyle rectangle
+actor "Khách hàng" as Customer
+actor "Dịch vụ thanh toán" as PaymentService
+actor "Barista" as Staff
+rectangle "BrewLite - UC-01: Đặt và thanh toán đơn hàng" {
+  usecase "Đặt và thanh toán
+đơn hàng" as Checkout
+  usecase "Xác thực JWT" as Auth
+  usecase "Tính giá và kiểm tra
+giỏ hàng ở server" as Pricing
+  usecase "Kiểm tra nguyên liệu" as Inventory
+  usecase "Thanh toán QR" as Pay
+  usecase "Sinh mã QR
+thanh toán" as QR
+  usecase "Nhận callback và đối soát" as Callback
+  usecase "Xem xác nhận đơn" as Confirm
+  usecase "Đưa đơn vào hàng chờ" as Queue
+  usecase "Áp mã khuyến mãi" as Coupon
+  usecase "Dùng điểm thưởng" as Redeem
+  usecase "Tích điểm thưởng" as Loyalty
+  usecase "Thử thanh toán lại" as Retry
+}
+Customer -- Checkout
+PaymentService -- QR
+PaymentService -- Callback
+Staff -- Queue
+Checkout ..> Auth : <<include>>
+Checkout ..> Pricing : <<include>>
+Checkout ..> Inventory : <<include>>
+Checkout ..> Pay : <<include>>
+Pay ..> QR : <<include>>
+Pay ..> Callback : <<include>>
+Pay ..> Confirm : <<include>>
+Pay ..> Queue : <<include>>
+Coupon ..> Checkout : <<extend>>
+Redeem ..> Checkout : <<extend>>
+Loyalty ..> Pay : <<extend>>
+Retry ..> Pay : <<extend>>
+@enduml

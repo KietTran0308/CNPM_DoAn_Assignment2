@@ -1,7 +1,5 @@
 # Private configuration
 .env
-.env.*
-!.env.example
 **/.env
 **/.env.*
 !**/.env.example
