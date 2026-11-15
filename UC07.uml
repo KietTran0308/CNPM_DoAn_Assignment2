@@ -1,0 +1,52 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC07: Đăng nhập
+
+|Khách hàng|
+start
+:Mở màn hình Đăng nhập;
+:Nhập Email, Mật khẩu;
+
+|Frontend (DangNhap)|
+:Kiểm tra dữ liệu (không trống, định dạng);
+if (Dữ liệu hợp lệ?) then (Không)
+  :Hiển thị lỗi nhập liệu;
+  stop
+else (Có)
+  :Gửi POST /auth/login;
+endif
+
+|Backend (AuthController/Service)|
+:ValidationPipe kiểm tra LoginDto;
+:Tìm user theo email;
+if (Tìm thấy tài khoản?) then (Không)
+  :UnauthorizedException;
+  |Frontend (DangNhap)|
+  :Thông báo sai tài khoản/mật khẩu;
+  stop
+else (Có)
+  |Backend (AuthController/Service)|
+  if (Mật khẩu chính xác?) then (Không)
+    :UnauthorizedException;
+    |Frontend (DangNhap)|
+    :Thông báo sai tài khoản/mật khẩu;
+    stop
+  else (Có)
+    :Tạo JWT Token;
+    :Trả về 200 OK (token, user);
+  endif
+endif
+
+|Frontend (DangNhap)|
+:Lưu Token, cập nhật state;
+
+if (Role == CUSTOMER?) then (Có)
+  :Chuyển đến Trang chủ / Menu;
+else (Không)
+  :Chuyển đến màn hình Quản lý pha chế;
+endif
+stop
+@enduml

@@ -1,0 +1,52 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC04: Chọn Size/Topping
+
+|Khách hàng|
+start
+:Tại màn hình Chi tiết SP (UC03);
+
+|Frontend (ProductDetailScreen)|
+:Tải tùy chọn Size/Topping (GET /options);
+:Hiển thị Size, Topping, mức đường/đá;
+
+|Khách hàng|
+if (Thay đổi tùy chọn?) then (Có)
+  :Chọn Size, Topping, mức đường/đá;
+  |Frontend (ProductDetailScreen)|
+  :Cập nhật size, tính lại đơn giá;
+  if (Topping còn bán?) then (Không)
+    :Làm mờ topping, thông báo hết hàng;
+    stop
+  else (Có)
+    :Tính đơn giá = giá size + topping;
+    :Tính tổng tiền = đơn giá * số lượng;
+  endif
+else (Không)
+endif
+
+|Khách hàng|
+if (Xác nhận thêm vào giỏ?) then (Có)
+  if (Số lượng vượt tồn kho?) then (Có)
+    :Thông báo đã đạt tồn kho tối đa;
+    stop
+  else (Không)
+    |Frontend (CartStore)|
+    :Kiểm tra món trùng (size, topping, đường, đá);
+    if (Đã có trùng?) then (Có)
+      :Cộng dồn số lượng, cập nhật lineTotal;
+    else (Không)
+      :Thêm dòng món mới;
+    endif
+    :Lưu giỏ hàng;
+    |Khách hàng|
+    :Quay lại Menu, cập nhật số món;
+    stop
+  endif
+else (Không)
+  stop
+endif
+@enduml

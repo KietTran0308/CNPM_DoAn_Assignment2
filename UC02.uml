@@ -1,0 +1,53 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC02: Xem Menu
+
+|Khách hàng|
+start
+:Truy cập Trang chủ / Menu;
+
+|Frontend (MenuScreen)|
+:Gửi GET /products;
+
+|Backend (ProductsController/Service)|
+:Truy vấn sản phẩm (isActive=true, kèm sizePrices);
+
+|Database|
+if (Truy vấn thành công?) then (Không)
+  :Trả lỗi 500;
+  |Frontend (MenuScreen)|
+  :Hiển thị "Không thể tải Menu" + nút Thử lại;
+  if (Nhấn Thử lại?) then (Có)
+    :Gửi lại GET /products;
+    stop
+  else (Không)
+    stop
+  endif
+else (Có)
+  :Trả danh sách sản phẩm;
+  |Frontend (MenuScreen)|
+  if (Danh sách có sản phẩm?) then (Không)
+    :Hiển thị menu trống;
+    stop
+  else (Có)
+    :Hiển thị danh mục, tên, hình ảnh, giá;
+  endif
+endif
+
+|Khách hàng|
+if (Khách hàng muốn tìm kiếm/lọc?) then (Có)
+  :Chọn danh mục hoặc nhập từ khóa;
+  |Frontend (MenuScreen)|
+  :Lọc danh sách;
+  if (Có kết quả phù hợp?) then (Có)
+    :Hiển thị danh sách đã lọc;
+  else (Không)
+    :Thông báo không tìm thấy sản phẩm;
+  endif
+else (Không)
+endif
+stop
+@enduml

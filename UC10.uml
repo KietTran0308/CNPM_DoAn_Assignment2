@@ -1,0 +1,23 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC10: Xem xác nhận đơn (Đã Fix)
+
+|Khách hàng|
+start
+:Tự động chuyển đến màn hình Xác nhận;
+
+|Frontend (XacNhanDon)|
+:Hiển thị thông tin đơn hàng (mã, trạng thái, điểm);
+
+|Khách hàng|
+if (Chọn hành động?) then (Về thực đơn)
+  :Chuyển về Trang chủ;
+else (Xem lịch sử)
+  :Chuyển sang màn hình Lịch sử đơn hàng (UC12);
+endif
+
+stop
+@enduml

@@ -1,0 +1,35 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC11: Tích điểm thưởng
+
+|Hệ thống / Staff|
+start
+:Đơn hàng chuyển sang trạng thái READY;
+:Nhấn "Đã nhận nước";
+
+|Backend (OrderService)|
+if (Token hợp lệ & Role STAFF/ADMIN?) then (Không)
+  :Trả lỗi 401/403;
+  stop
+else (Có)
+  :Kiểm tra trạng thái đơn (READY -> COMPLETED);
+  if (Trạng thái không hợp lệ?) then (Có)
+    :Trả lỗi 409 Conflict;
+    stop
+  else (Không)
+    :Cập nhật trạng thái COMPLETED;
+    |Backend (RewardsController)|
+    :Tính điểm = floor(tổng tiền / 10000);
+    if (Điểm > 0?) then (Có)
+      :Cộng điểm vào tài khoản;
+      :Ghi log giao dịch điểm;
+    else (Không)
+    endif
+    :Trả về thành công;
+    stop
+  endif
+endif
+@enduml

@@ -1,0 +1,49 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC03: Xem chi tiết sản phẩm
+
+|Khách hàng|
+start
+:Chạm vào sản phẩm trên Menu;
+
+|Frontend (ProductDetailScreen)|
+:Gửi GET /products/{id};
+
+|Backend (Controller/Service)|
+:Kiểm tra định dạng UUID;
+if (ID hợp lệ?) then (Không)
+  :Trả 400 Bad Request;
+  |Frontend (ProductDetailScreen)|
+  :Thông báo lỗi, quay lại Menu;
+  stop
+else (Có)
+  |Backend (Controller/Service)|
+  :Tìm sản phẩm (isActive=true, kèm sizePrices);
+  if (Sản phẩm tồn tại?) then (Không)
+    :Trả 404 Not Found;
+    |Frontend (ProductDetailScreen)|
+    :Hiển thị "Tạm hết hàng" / vô hiệu nút mua;
+    stop
+  else (Có)
+    :Trả 200 OK, product;
+    |Frontend (ProductDetailScreen)|
+    :Hiển thị hình ảnh, tên, giá, mô tả;
+    :Hiển thị tùy chọn Size/Topping;
+  endif
+endif
+
+|Khách hàng|
+if (Tùy chỉnh Size/Topping?) then (Có)
+  :Mở UC04 - Chọn Size/Topping;
+else (Không)
+endif
+
+if (Thêm vào giỏ hàng?) then (Có)
+  :Thêm món vào giỏ;
+else (Không)
+endif
+stop
+@enduml

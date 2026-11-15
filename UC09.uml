@@ -1,0 +1,43 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC09: Thanh toán không tiền mặt
+
+|Khách hàng|
+start
+:Chọn phương thức thanh toán điện tử;
+:Nhấn "Xác nhận thanh toán";
+
+|Frontend (ThanhToan)|
+:Gửi yêu cầu thanh toán;
+
+|Backend (PaymentController/Service)|
+if (Token không hợp lệ?) then (Có)
+  :Trả 401 Unauthorized;
+  stop
+else (Không)
+  :Kiểm tra Key Idempotency;
+  if (Trùng lặp?) then (Có)
+    :Trả 409 Conflict;
+    stop
+  else (Không)
+    :Gọi cổng thanh toán bên thứ 3;
+    if (Thanh toán thành công?) then (Không)
+      :Rollback Transaction;
+      :Trả lỗi thanh toán;
+      |Frontend (ThanhToan)|
+      :Hiển thị thông báo thất bại;
+      stop
+    else (Có)
+      :Cập nhật trạng thái PAID;
+      :Xóa giỏ hàng;
+      :Trả kết quả thành công;
+      |Frontend (ThanhToan)|
+      :Chuyển màn hình Xác nhận;
+      stop
+    endif
+  endif
+endif
+@enduml

@@ -1,0 +1,61 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC06: Tạo đơn hàng (Thanh toán)
+
+|Khách hàng|
+start
+:Nhấn "Tiến hành thanh toán";
+
+|Frontend (GioHang)|
+if (Đã đăng nhập?) then (Không)
+  :Chuyển sang UC07 (Đăng nhập);
+  stop
+else (Có)
+  :Hiển thị màn hình Thanh toán;
+endif
+
+|Khách hàng|
+:Nhập địa chỉ, chọn PT thanh toán;
+:Nhấn "Đặt hàng";
+
+|Backend (OrderController/Service)|
+:Tiếp nhận yêu cầu;
+if (Thông tin hợp lệ?) then (Không)
+  :Trả lỗi 400;
+  stop
+else (Có)
+  :Bắt đầu Transaction (Serializable);
+  :Kiểm tra tồn kho;
+  if (Hết hàng?) then (Có)
+    :Rollback, trả lỗi 409 OutOfStock;
+    |Frontend (GioHang)|
+    :Thông báo hết hàng;
+    stop
+  else (Không)
+    :Tính toán giá, áp mã giảm giá (nếu có);
+    :Tạo đơn hàng (PENDING);
+    :Commit Transaction;
+  endif
+endif
+
+|Frontend (GioHang)|
+:Chuyển sang xử lý thanh toán;
+
+|Backend (Payment)|
+if (Thanh toán thành công?) then (Không)
+  :Đánh dấu đơn FAILED;
+  :Rollback/hoàn kho;
+  |Frontend (GioHang)|
+  :Thông báo thanh toán thất bại;
+  stop
+else (Có)
+  :Đánh dấu PAID, tạo Payment;
+  :Clear giỏ hàng;
+  |Frontend (GioHang)|
+  :Chuyển đến màn hình Xác nhận (UC10);
+  stop
+endif
+@enduml

@@ -1,0 +1,42 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC13: Tiếp nhận đơn
+
+|Staff / Barista|
+start
+:Mở màn hình Quản lý pha chế;
+:Xem danh sách đơn PAID;
+
+:Nhấn "Tiếp nhận đơn";
+
+|Backend (OrderController/Service)|
+if (Có quyền STAFF/ADMIN?) then (Không)
+  :Trả 403 Forbidden;
+  stop
+else (Có)
+  :Bắt đầu Transaction;
+  :Kiểm tra trạng thái đơn (PAID -> PREPARING);
+  if (Trạng thái sai?) then (Có)
+    :Trả 400 Bad Request;
+    stop
+  else (Không)
+    :Kiểm tra xuất kho nguyên liệu;
+    if (Thiếu nguyên liệu?) then (Có)
+      :Rollback, trả lỗi 409 Conflict;
+      |Staff / Barista|
+      :Báo thiếu nguyên liệu;
+      stop
+    else (Không)
+      :Trừ kho nguyên liệu;
+      :Cập nhật trạng thái PREPARING;
+      :Commit Transaction;
+      |Staff / Barista|
+      :Đơn chuyển sang "Đang chuẩn bị";
+      stop
+    endif
+  endif
+endif
+@enduml

@@ -1,0 +1,45 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC12: Xem lịch sử đơn
+
+|Khách hàng|
+start
+:Vào màn hình Lịch sử đơn hàng;
+
+|Frontend (LichSuDon)|
+:Gửi GET /orders/me;
+
+|Backend (OrderController/Service)|
+if (Token hợp lệ?) then (Không)
+  :Trả 401 Unauthorized;
+  stop
+else (Có)
+  :Truy vấn danh sách đơn hàng của user;
+  :Trả về 200 OK (danh sách);
+endif
+
+|Frontend (LichSuDon)|
+if (Có đơn hàng?) then (Không)
+  :Hiển thị "Bạn chưa có đơn hàng";
+  stop
+else (Có)
+  :Hiển thị danh sách đơn (mới nhất xếp trước);
+endif
+
+|Khách hàng|
+if (Chọn xem chi tiết?) then (Có)
+  :Hiển thị chi tiết món, giá, trạng thái;
+else (Không)
+endif
+
+if (Nhấn "Đặt lại"?) then (Có)
+  :Thêm món cũ vào giỏ hàng;
+  :Chuyển đến Giỏ hàng;
+  stop
+else (Không)
+  stop
+endif
+@enduml

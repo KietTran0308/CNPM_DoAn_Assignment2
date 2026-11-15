@@ -1,0 +1,56 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC05: Quản lý giỏ hàng
+
+|Khách hàng|
+start
+:Mở màn hình Giỏ hàng;
+
+|Frontend (GioHang / CartScreen)|
+:Yêu cầu CartStore lấy cartLines;
+if (Giỏ hàng trống?) then (Có)
+  :Hiển thị "Giỏ hàng đang trống";
+  stop
+else (Không)
+  :Hiển thị danh sách món + tổng tiền;
+endif
+
+|Khách hàng|
+if (Chọn thao tác?) then (Tăng/Giảm SL)
+  |Frontend (CartStore)|
+  :Cập nhật số lượng;
+  if (Vượt tồn kho hoặc SL <= 0?) then (Có)
+    :Giữ nguyên / Xóa dòng, báo lỗi;
+  else (Không)
+    :Cập nhật lineTotal, lưu giỏ;
+  endif
+
+else if (Chỉnh sửa tùy chọn)
+  |Khách hàng|
+  :Mở hộp thoại tùy chỉnh;
+  if (Lưu thay đổi?) then (Có)
+    |Frontend (CartStore)|
+    :Cập nhật món, tính lại giá;
+    if (Có món trùng?) then (Có)
+      :Cộng dồn SL, xóa dòng trùng;
+    else (Không)
+      :Cập nhật lineTotal;
+    endif
+    :Lưu giỏ;
+  else (Hủy)
+    :Đóng hộp thoại;
+  endif
+
+else if (Xóa món / Xóa tất cả)
+  |Frontend (CartStore)|
+  :Xóa món / Xóa toàn bộ;
+  :Lưu giỏ hàng;
+endif
+
+|Frontend (GioHang / CartScreen)|
+:Cập nhật lại tổng tiền và UI giỏ hàng;
+stop
+@enduml

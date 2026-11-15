@@ -1,0 +1,39 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC08: Áp mã khuyến mãi
+
+|Khách hàng|
+start
+:Tại màn hình Thanh toán (UC06);
+:Chọn mục "Mã khuyến mãi";
+:Nhập hoặc chọn mã;
+
+|Frontend (ThanhToan)|
+if (Mã hợp lệ về định dạng?) then (Không)
+  :Thông báo mã không hợp lệ;
+  stop
+else (Có)
+  :Gọi API áp dụng mã;
+endif
+
+|Backend (VouchersController)|
+:Kiểm tra điều kiện áp dụng (thời gian, đối tượng, số lượng);
+
+if (Thỏa mãn điều kiện?) then (Không)
+  :Trả lỗi "Mã không hợp lệ/hết hạn";
+  |Frontend (ThanhToan)|
+  :Hiển thị lỗi;
+  stop
+else (Có)
+  :Tính toán số tiền giảm;
+  :Trả về kết quả;
+endif
+
+|Frontend (ThanhToan)|
+:Cập nhật số tiền giảm vào tổng thanh toán;
+:Hiển thị tổng tiền mới;
+stop
+@enduml

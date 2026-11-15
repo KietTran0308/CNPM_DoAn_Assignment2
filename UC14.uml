@@ -1,0 +1,35 @@
+@startuml
+skinparam backgroundColor white
+skinparam style strictuml
+skinparam DefaultFontName Arial
+skinparam conditionStyle diamond
+title Activity Diagram - UC14: Cập nhật trạng thái pha chế
+
+|Staff / Barista|
+start
+:Tại màn hình Quản lý pha chế;
+:Chọn đơn đang PREPARING;
+:Nhấn "Hoàn tất" (hoặc "Đã giao");
+
+|Backend (OrderController/Service)|
+if (Có quyền?) then (Không)
+  :Trả 403 Forbidden;
+  stop
+else (Có)
+  :Kiểm tra trạng thái hợp lệ (READY/COMPLETED);
+  if (Trạng thái sai?) then (Có)
+    :Trả 400 Bad Request;
+    stop
+  else (Không)
+    :Cập nhật trạng thái mới;
+    :Ghi log OrderStatusHistory;
+    :Commit Transaction;
+    |Frontend (Màn hình pha chế)|
+    :Cập nhật UI (đơn hoàn tất);
+  endif
+endif
+
+|Khách hàng|
+:App tự động làm mới, hiển thị trạng thái mới;
+stop
+@enduml
