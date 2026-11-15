@@ -53,7 +53,7 @@ test('Giữ trước tài nguyên trong giao dịch chờ thanh toán', () => {
         } });
         const now = new Date();
         const coupon = await db.coupon.create({ data: {
-            code: `RSC${suffix}`, discountType: 'FIXED', discountValue: 1000,
+            code: `RSC${suffix.toUpperCase()}`, discountType: 'FIXED', discountValue: 1000,
             maxUses: 1, validFrom: new Date(now.getTime() - 60_000),
             validTo: new Date(now.getTime() + 3600_000),
         } });
