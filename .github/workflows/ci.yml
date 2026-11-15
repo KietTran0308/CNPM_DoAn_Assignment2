@@ -1,4 +1,6 @@
-name: CI - BrewLite Assignment 2
+name: CI - BrewLite
+
+
 
 on:
   workflow_call:
@@ -10,10 +12,19 @@ on:
 permissions:
   contents: read
 
+# Chỉ hủy run cũ khi là PR; push/tag/release không bị hủy giữa chừng
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # ─────────────────────────────────────────────
+  # JOB 1: API - lint, unit + integration test, build
+  # ─────────────────────────────────────────────
   api:
     name: API - lint / unit / integration / build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -36,31 +47,44 @@ jobs:
       TEST_DATABASE_URL: postgresql://postgres:github_ci_only_password@127.0.0.1:5432/brewlite_test?schema=public
       JWT_SECRET: github_ci_test_jwt_secret_never_use_in_production
       ENABLE_DEMO_PAYMENTS: 'true'
+      NODE_ENV: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: apps/api/package-lock.json
-      - name: Install
+
+      - name: Install dependencies
         run: npm ci
+
+      # Khởi tạo DB test từ đúng file SQL của ứng dụng (sát production hơn `prisma db push`)
       - name: Initialize isolated test database from current application SQL
         shell: bash
         run: |
           docker exec -i "${{ job.services.postgres.id }}" psql -v ON_ERROR_STOP=1 -U postgres -d brewlite_test < prisma/dbBrewLite.sql
+
       - name: Generate Prisma Client
         run: npx prisma generate --schema=prisma/schema.prisma
+
       - name: Lint (TypeScript check)
         run: npm run lint
+
       - name: Unit + isolated integration tests
         run: npm test
+
       - name: Build NestJS
         run: npm run build
 
+ 
   web:
     name: Web - lint / test / build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: apps/web
@@ -68,17 +92,78 @@ jobs:
       NEXT_PUBLIC_API_URL: http://localhost:4100
       NEXT_PUBLIC_ENABLE_DEMO_PAYMENTS: 'false'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
-      - name: Install
+
+      - name: Install dependencies
         run: npm ci
+
       - name: Lint (TypeScript check)
         run: npm run lint
+
       - name: Unit tests
         run: npm test -- --runInBand
+
       - name: Build Next.js
         run: npm run build
+
+ 
+  docker-build:
+    name: Docker - verify image builds
+    needs: [api, web]
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./apps/api
+          push: false
+          tags: brewlite-api:ci
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Build Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./apps/web
+          push: false
+          tags: brewlite-web:ci
+          build-args: |
+            NEXT_PUBLIC_API_URL=http://localhost:4100
+            NEXT_PUBLIC_ENABLE_DEMO_PAYMENTS=false
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+ 
+  ci-result:
+    name: CI result
+    needs: [api, web, docker-build]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+              echo "CI failed"; exit 1
+            fi
+          done
+          echo "CI passed"

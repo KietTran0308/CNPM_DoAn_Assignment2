@@ -1,7 +1,4 @@
-# CD scaffold: Build/push images on release tags; Render hooks optional.
-# Requires CI pass and branch protection configured manually in GitHub.
-name: CD - Docker release images
-
+name: CD - Release images and deploy to Render
 on:
   push:
     tags: ['v*']
@@ -9,41 +6,83 @@ on:
 
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   quality:
+    name: Quality gate (CI)
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
 
   images:
+    name: Build and push images
     needs: quality
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      prefix: ${{ steps.names.outputs.prefix }}
+      sha: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Generate lowercase GHCR repository name
         id: names
         shell: bash
         run: echo "prefix=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Require public HTTPS API URL for web image
+        env:
+          PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+        run: |
+          case "$PUBLIC_API_URL" in
+            https://*) ;;
+            *) echo 'Configure repository variable NEXT_PUBLIC_API_URL as a public HTTPS URL'; exit 1 ;;
+          esac
+
       - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      
+      - name: API image metadata
+        id: meta-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.names.outputs.prefix }}-api
+          tags: |
+            type=raw,value=${{ github.sha }}
+            type=ref,event=tag
+
       - name: Build + push API image
         uses: docker/build-push-action@v6
         with:
           context: ./apps/api
           push: true
-          tags: ${{ steps.names.outputs.prefix }}-api:${{ github.sha }}
-      # Set repo variable NEXT_PUBLIC_API_URL to public HTTPS API before releasing.
-      - name: Require public API URL for web image
-        env:
-          PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
-        run: |
-          case "$PUBLIC_API_URL" in https://*) ;; *) echo 'Configure repository variable NEXT_PUBLIC_API_URL as public HTTPS URL'; exit 1 ;; esac
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Web image metadata
+        id: meta-web
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.names.outputs.prefix }}-web
+          tags: |
+            type=raw,value=${{ github.sha }}
+            type=ref,event=tag
+
       - name: Build + push Web image
         uses: docker/build-push-action@v6
         with:
@@ -52,9 +91,74 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
             NEXT_PUBLIC_ENABLE_DEMO_PAYMENTS=false
-          tags: ${{ steps.names.outputs.prefix }}-web:${{ github.sha }}
+          tags: ${{ steps.meta-web.outputs.tags }}
+          labels: ${{ steps.meta-web.outputs.labels }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
 
-  # OPTIONAL: Works only if your Render services are already configured to deploy
-  # these corresponding image tags. A hook alone does NOT import GHCR images.
-  # No automatic production schema migration is configured (fresh local SQL != production migration).
-  # For now deployment and rollback are documented as manual in docs/deployment.md.
+  # ── 3. Deploy lên Render bằng đúng image SHA vừa build ─────────────────
+  deploy:
+    name: Deploy to Render
+    needs: images
+    # Chỉ chạy khi đã bật RENDER_AUTO_DEPLOY=true (repo variable)
+    if: ${{ vars.RENDER_AUTO_DEPLOY == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production   # Yêu cầu approve nếu cấu hình Required reviewers
+    permissions:
+      contents: read
+    env:
+      IMAGE_PREFIX: ${{ needs.images.outputs.prefix }}
+      IMAGE_SHA: ${{ needs.images.outputs.sha }}
+    steps:
+      # Hook của Render chứa key nên truyền qua env, không in ra log.
+      # Với service dạng image, thêm tham số imgURL để chỉ định đúng tag cần deploy.
+      - name: Deploy Backend service
+        env:
+          HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}
+        run: |
+          echo "Triggering backend deploy (${IMAGE_SHA})..."
+          IMG=$(python3 -c "import os,urllib.parse as u; print(u.quote(os.environ['IMAGE_PREFIX']+'-api:'+os.environ['IMAGE_SHA'], safe=''))")
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${HOOK_URL}&imgURL=${IMG}")
+          echo "Backend deploy hook response: $CODE"
+          case "$CODE" in 200|201|202) ;; *) echo "Backend deploy hook failed with HTTP $CODE"; exit 1 ;; esac
+
+      - name: Deploy Frontend service
+        env:
+          HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_FRONTEND }}
+        run: |
+          echo "Triggering frontend deploy (${IMAGE_SHA})..."
+          IMG=$(python3 -c "import os,urllib.parse as u; print(u.quote(os.environ['IMAGE_PREFIX']+'-web:'+os.environ['IMAGE_SHA'], safe=''))")
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${HOOK_URL}&imgURL=${IMG}")
+          echo "Frontend deploy hook response: $CODE"
+          case "$CODE" in 200|201|202) ;; *) echo "Frontend deploy hook failed with HTTP $CODE"; exit 1 ;; esac
+
+      # Tùy chọn: chờ service lên (cần đặt repo variable BACKEND_HEALTH_URL / FRONTEND_HEALTH_URL)
+      - name: Smoke check
+        env:
+          BACKEND_HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL }}
+          FRONTEND_HEALTH_URL: ${{ vars.FRONTEND_HEALTH_URL }}
+        run: |
+          check() {
+            url="$1"
+            [ -z "$url" ] && return 0
+            for i in $(seq 1 30); do
+              code=$(curl -s -o /dev/null -w "%{http_code}" "$url" || true)
+              if [ "$code" = "200" ]; then echo "OK: $url"; return 0; fi
+              echo "Waiting for $url (attempt $i, HTTP $code)"; sleep 10
+            done
+            echo "Smoke check failed: $url"; return 1
+          }
+          check "$BACKEND_HEALTH_URL"
+          check "$FRONTEND_HEALTH_URL"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deploy triggered"
+            echo "- Commit: \`${IMAGE_SHA}\`"
+            echo "- API: \`${IMAGE_PREFIX}-api:${IMAGE_SHA}\`"
+            echo "- Web: \`${IMAGE_PREFIX}-web:${IMAGE_SHA}\`"
+            echo "- Rollback: chạy lại workflow với tag cũ, hoặc deploy lại image SHA trước đó trên Render"
+            echo "- DB migration: KHÔNG tự động, xem docs/deployment.md"
+          } >> "$GITHUB_STEP_SUMMARY"
