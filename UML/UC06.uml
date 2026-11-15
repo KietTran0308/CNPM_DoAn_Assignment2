@@ -14,6 +14,7 @@ database "Database\n(PostgreSQL)" as DB
 note over C, DB : Tiền điều kiện: giỏ hàng có ít nhất 1 sản phẩm
 
 C -> UI : Chọn "Tiến hành thanh toán"
+activate UI
 
 alt Chưa đăng nhập (include UC-07)
     UI --> C : Chuyển sang màn hình Đăng nhập, giữ nguyên giỏ hàng
@@ -28,13 +29,16 @@ else Đã đăng nhập
         UI --> C : Hiển thị thông báo lỗi
     else Hợp lệ
         API -> DB : Tìm đơn theo Idempotency-Key
+        activate DB
         DB --> API : Order hoặc null
+        deactivate DB
 
         alt Key đã tồn tại (client gửi lại)
             API --> UI : Trả đơn đã tạo (cùng user, cùng request hash)\nhoặc 409 nếu khác yêu cầu
             UI --> C : Tiếp tục với đơn cũ, không tạo đơn trùng
         else Key mới
             API -> DB : BEGIN TRANSACTION (Serializable)
+            activate DB
             loop Mỗi món trong giỏ
                 API -> DB : Kiểm tra sản phẩm đang bán, giá theo size, topping hợp lệ
                 DB --> API : Giá size, giá topping
@@ -52,12 +56,15 @@ else Đã đăng nhập
 
             alt Món/topping, coupon hoặc điểm không hợp lệ
                 API -> DB : ROLLBACK
+                deactivate DB
                 API --> UI : 400 / 403 (thông báo lỗi cụ thể)
                 UI --> C : Hiển thị lỗi, yêu cầu cập nhật giỏ hàng / bỏ mã
             else Hợp lệ
                 API -> DB : Tạo Order (PENDING, hạn 20 phút) + OrderItems + Toppings + status history
+                activate DB
                 DB --> API : orderId, orderCode, total
                 API -> DB : COMMIT
+                deactivate DB
                 API --> UI : 201 {id, orderCode, status: PENDING, total}
                 UI --> C : Hiển thị tổng tiền chính thức, chuyển sang thanh toán (UC-09)
             end
@@ -65,4 +72,5 @@ else Đã đăng nhập
     end
     deactivate API
 end
+deactivate UI
 @enduml
